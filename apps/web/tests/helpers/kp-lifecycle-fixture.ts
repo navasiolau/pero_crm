@@ -54,7 +54,6 @@ export function lifecycleFixture() {
     async completeJob(claim, result) { const row = state.jobs.get(claim.id); if (!row || row.leaseOwner !== claim.owner || row.attempts !== claim.attempt) throw Error("fixture-lease"); Object.assign(row, { state: "SUCCEEDED", result: copy(result), leaseOwner: null, leaseUntil: null }); },
     async accept(proposalId, versionId, at, epoch) { if (proposalId !== state.proposal.id) throw Error("fixture-owner"); Object.assign(state.proposal, { acceptedVersionId: versionId, retentionEpoch: epoch }); state.acceptedAt = at; },
     async cancelPruneJobs() { for (const job of state.cleanup) if (job.state !== "SUCCEEDED") job.state = "CANCELLED"; },
-    async enqueuePrune(input) { if (!state.cleanup.some(row => row.proposalId === input.proposalId && row.epoch === input.epoch)) state.cleanup.push({ ...input, state: "PENDING" }); },
     receipt: async id => copy(state.receipts.get(id) ?? null), createReceipt: async (id, value) => { state.receipts.set(id, copy(value)); },
   };
   const transaction: LifecycleTransaction = async run => {

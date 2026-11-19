@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { assertWritableFileStorageKey } from "../../src/server/files/storage-binding-fence";
 import { createPrismaRetentionRepository } from "../../src/server/kp/retention-repository";
 import { executeProposalRetention, type RetentionStorage } from "../../src/server/kp/retention-executor";
 
@@ -47,23 +46,17 @@ export async function verifyKpRetentionNative(tx: Prisma.TransactionClient, runI
       async list(_binding,key){return{entries:(objects.get(key)??[]).map(row=>({key,id:row.id,marker:row.marker}))};},
       async head(_binding,key){const last=objects.get(key)?.at(-1);return last&&!last.marker?{size:last.bytes.length}:null;},
       async digest(_binding,key,id){const rows=objects.get(key)??[],row=id===null?rows.at(-1):rows.find(value=>value.id===id);return row&&!row.marker?{size:row.bytes.length,sha256:sha(row.bytes)}:null;},
-      async deleteVersion(_binding,key,id){
-        const [job]=await tx.$queryRaw<{result:{objects:Record<string,{versions:{id:string|null;phase:string}[]}>}}[]>`SELECT result FROM"ProposalJob"WHERE id=${activeCleanupId}`;
-        assert.ok(Object.values(job.result.objects).some(value=>value.versions.some(version=>version.id===id&&version.phase==='INTENT')),'native version intent must exist before S3 effect');
-        objects.set(key,id===null?[]:(objects.get(key)??[]).filter(row=>row.id!==id));
-      }};
-    let activeCleanupId=cleanupId;
+      async deleteVersion(){ throw Error("PUBLISHED_RETENTION_PHYSICAL_DELETE_FORBIDDEN"); }};
     const nested={$transaction:((action:(connection:Prisma.TransactionClient)=>Promise<unknown>)=>action(tx))as unknown as PrismaClient['$transaction']};
     const repository=createPrismaRetentionRepository(nested,{now:()=>now});
     const claim=await repository.claim('native188',120_000,cleanupId);assert.ok(claim);
-    await executeProposalRetention({repository,storage,enabled:()=>true,now:()=>now},claim);
-    const [job]=await tx.$queryRaw<{state:string}[]>`SELECT state FROM"ProposalJob"WHERE id=${cleanupId}`;assert.equal(job.state,'SUCCEEDED');
-    assert.equal((await tx.$queryRaw<{id:string}[]>`SELECT id FROM"ProposalVersion"WHERE id=${oldId}`).length,0);
-    assert.equal((await tx.$queryRaw<{state:string}[]>`SELECT state FROM"ProposalArtifact"WHERE id=${prefix+'-pdf-kept'}`)[0].state,'READY');
-    assert.equal((await tx.$queryRaw<{state:string}[]>`SELECT state FROM"ProposalArtifact"WHERE id=${prefix+'-pdf-old'}`)[0].state,'DELETED');
-    assert.equal(objects.get(`kp/proposals/${proposalId}/optimized/${sharedId}.jpg`)!.length,3);
-    assert.deepEqual(objects.get(`kp/proposals/${proposalId}/optimized/${unusedId}.jpg`),[]);
-    checks.push('native-policy-shared-accepted-pdf-and-exact-versioned-progress');
+    await assert.rejects(executeProposalRetention({repository,storage,enabled:()=>true,now:()=>now},claim),/CANCELLED/);
+    assert.ok(await tx.proposalVersion.findUnique({where:{id:oldId}}));
+    assert.equal((await tx.proposalArtifact.findUniqueOrThrow({where:{id:prefix+'-pdf-kept'}})).state,'READY');
+    assert.equal((await tx.proposalArtifact.findUniqueOrThrow({where:{id:prefix+'-pdf-old'}})).state,'READY');
+    assert.equal(objects.get("kp/proposals/"+proposalId+"/optimized/"+sharedId+".jpg")!.length,3);
+    assert.equal(objects.get("kp/proposals/"+proposalId+"/optimized/"+unusedId+".jpg")!.length,3);
+    checks.push('native-business-history-cancels-prune-and-preserves-all-versions');
 
     const productId=prefix+'-product',itemId=prefix+'-item',fileId=randomUUID(),copyJobId=randomUUID();
     await tx.product.create({data:{id:productId,projectId,number:`${numberInt}.1`,suffixInt:1,title:'Копия188',status:'PREPARATION'}});
@@ -77,17 +70,11 @@ export async function verifyKpRetentionNative(tx: Prisma.TransactionClient, runI
     const retireId=randomUUID(),retire={schema:1,kind:'RETIRED_PRODUCT_COPY',proposalId,projectId,fileId,storedName,sourceMediaId:sharedId,operationJobId:copyJobId,binding,objects:[copyObject]};
     await tx.$executeRaw`INSERT INTO "ProposalJob"(id,"proposalId",kind,"dedupeKey",payload,"createdById","createdAt","updatedAt")
       VALUES(${retireId},${proposalId},'PURGE_MEDIA',${'native188:retired:'+runId},${JSON.stringify(retire)}::jsonb,${actorId},${now},${now})`;
-    activeCleanupId=retireId;
     const copyClaim=await repository.claim('native188',120_000,retireId);assert.ok(copyClaim);
-    await executeProposalRetention({repository,storage,enabled:()=>true,now:()=>now},copyClaim);
-    assert.equal(await tx.file.findUnique({where:{id:fileId}}),null);
-    assert.deepEqual(objects.get(copyObject.key),[]);
-    const [tombstone]=await tx.$queryRaw<{id:string;processedAt:Date|null;newValue:{physicalRetentionJobId:string;keys:string[];absenceProof:unknown}}[]>`
-      SELECT e.id,e."processedAt",c."newValue" FROM"DomainEvent"e JOIN"ChangeLog"c ON c.id=e.id WHERE e.type='file.storage-delete'
-        AND e.payload->>'fileId'=${fileId}`;
-    assert.ok(tombstone.processedAt);assert.equal(tombstone.newValue.physicalRetentionJobId,retireId);assert.deepEqual(tombstone.newValue.keys,[copyObject.key]);
-    await assert.rejects(assertWritableFileStorageKey(tx,projectId,storedName),/Файл уже удалён/);
-    checks.push('native-retired-file-exact-physical-proof-tombstone-and-reattach-fence');
+    await assert.rejects(executeProposalRetention({repository,storage,enabled:()=>true,now:()=>now},copyClaim),/CANCELLED/);
+    assert.ok((await tx.file.findUniqueOrThrow({where:{id:fileId}})).proposalMediaRetiredAt);
+    assert.equal(objects.get(copyObject.key)!.length,3);
+    checks.push('native-retired-file-row-and-storage-versions-preserved');
     return checks;
   }finally{await tx.$executeRaw`ROLLBACK TO SAVEPOINT kp188_native`;await tx.$executeRaw`RELEASE SAVEPOINT kp188_native`;}
 }

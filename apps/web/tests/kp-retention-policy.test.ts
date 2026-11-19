@@ -1,61 +1,32 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { RetentionError, makeRetentionManifest, retentionAnniversary, retentionPayload, type RetentionPayload } from "../src/server/kp/retention-contract";
-import { planProposalRetention,shouldScheduleAcceptanceCleanup } from "../src/server/kp/retention-policy";
-import { acceptedPayload, fact, retentionBinding, retentionSnapshot, retentionTime } from "./helpers/kp-retention-fixture";
+import { planProposalRetention } from "../src/server/kp/retention-policy";
+import { acceptedPayload, fact, retentionBinding, retentionSnapshot, retentionTime, technicalCleanup } from "./helpers/kp-retention-fixture";
 
-test("IN_WORK retains accepted PDF/shared optimized media and independent issued contract", () => {
-  const snapshot = retentionSnapshot(), plan = planProposalRetention(snapshot, acceptedPayload, retentionTime);
-  assert.deepEqual(plan.pruneVersionIds, ["old"]);
-  assert.deepEqual(plan.targets.filter(target => target.entity === "MEDIA").map(target => `${target.entityId}:${target.variant}`).sort(),
-    ["current:original", "old-only:optimized", "old-only:original", "shared:original"]);
-  assert.deepEqual(plan.targets.filter(target => target.entity === "ARTIFACT").map(target => target.entityId), ["pdf-old"]);
-  assert.ok(!plan.targets.some(target => target.key.includes("contracts/") || target.entityId === "pdf-kept"));
-});
-
-test("year expiry is from original creation including old archives and Feb29 anniversary", () => {
-  const snapshot = retentionSnapshot(); snapshot.proposal.createdAt = new Date("2024-02-29T12:00:00Z");
-  snapshot.proposal.projectId = null; snapshot.proposal.stage = null;
-  const expiry = retentionAnniversary(snapshot.proposal.createdAt).toISOString();
-  assert.equal(expiry, "2025-02-28T12:00:00.000Z");
-  const payload: RetentionPayload = { schema: 1, kind: "ANNUAL_MEDIA", proposalId: "proposal", expiresAt: expiry };
-  assert.throws(() => planProposalRetention(snapshot, payload, new Date("2025-02-28T11:59:59Z")), /NOT_DUE/);
-  const plan = planProposalRetention(snapshot, payload, new Date(expiry));
-  assert.equal(plan.targets.length, 6); assert.ok(plan.targets.every(target => target.entity === "MEDIA"));
-  assert.deepEqual(plan.pruneVersionIds, []);
-});
-
-test("epoch/stage/accepted mismatch cancels old acceptance policy", () => {
-  for (const key of ["stage", "epoch", "acceptedVersionId"] as const) {
-    const snapshot = retentionSnapshot();
-    if (key === "stage") snapshot.proposal.stage = "LEAD";
-    if (key === "epoch") snapshot.proposal.epoch++;
-    if (key === "acceptedVersionId") snapshot.proposal.acceptedVersionId = "another";
-    assert.throws(() => planProposalRetention(snapshot, acceptedPayload, retentionTime), /CANCELLED/);
+test("stage changes and yearly retention preserve all published revisions and objects", () => {
+  const snapshot = retentionSnapshot();
+  for (const stage of ["LEAD", "IN_WORK", "DONE", "PAUSED", "RECLAMATION"]) {
+    snapshot.proposal.stage = stage;
+    assert.deepEqual(planProposalRetention(snapshot, acceptedPayload, retentionTime).targets, []);
+    assert.deepEqual(planProposalRetention(snapshot, acceptedPayload, retentionTime).pruneVersionIds, []);
   }
+  snapshot.proposal.createdAt = new Date("2024-02-29T12:00:00Z");
+  const expiresAt = retentionAnniversary(snapshot.proposal.createdAt).toISOString();
+  assert.equal(expiresAt, "2025-02-28T12:00:00.000Z");
+  assert.deepEqual(planProposalRetention(snapshot,
+    { schema: 1, kind: "ANNUAL_MEDIA", proposalId: "proposal", expiresAt }, retentionTime).targets, []);
 });
 
-test('queued IN_WORK retention still runs after DONE/PAUSED/RECLAMATION with same acceptance',()=>{
-  for(const stage of['DONE','PAUSED','RECLAMATION']){
-    const snapshot=retentionSnapshot();snapshot.proposal.stage=stage;
-    assert.equal(shouldScheduleAcceptanceCleanup(snapshot),true);
-    const manifest=planProposalRetention(snapshot,acceptedPayload,retentionTime);
-    assert.ok(manifest.targets.length>0);assert.deepEqual(manifest.pruneVersionIds,['old']);
-  }
-  const beforeInWork=retentionSnapshot();beforeInWork.proposal.stage='CONTRACT';beforeInWork.inWorkTriggered=false;
-  assert.equal(shouldScheduleAcceptanceCleanup(beforeInWork),false);
-  beforeInWork.inWorkTriggered=true;assert.equal(shouldScheduleAcceptanceCleanup(beforeInWork),true);
-  beforeInWork.proposal.stage='LEAD';assert.equal(shouldScheduleAcceptanceCleanup(beforeInWork),false);
-});
-
-test("active PDF/CONTRACT frozen sources and source-copy leases protect physical cleanup", () => {
+test("active renders and copies protect a technical object until the live source releases it", () => {
   for (const kind of ["PDF", "CONTRACT", "COPY_PRODUCT_MEDIA", "UPLOAD_MEDIA"]) {
-    const snapshot = retentionSnapshot(); snapshot.jobs.push({ id: "busy", kind, state: "PROCESSING", attempts: 1, maxAttempts: 5,
+    const snapshot = retentionSnapshot(), payload = technicalCleanup(snapshot);
+    snapshot.jobs.push({ id: "busy", kind, state: "PROCESSING", attempts: 1, maxAttempts: 5,
       leaseUntil: new Date(retentionTime.getTime()+60_000), result: null,
-      payload: kind === "PDF" || kind === "CONTRACT" ? { frozenSources: [{ proposalId: "proposal", media: [{ id: "shared" }] }] } : { mediaId: "shared" } });
-    assert.throws(() => planProposalRetention(snapshot, acceptedPayload, retentionTime), error => error instanceof RetentionError && error.retryable);
-    snapshot.jobs[0].leaseUntil = new Date(retentionTime.getTime()-1);
-    assert.ok(planProposalRetention(snapshot, acceptedPayload, retentionTime).targets.length > 0);
+      payload: kind === "PDF" || kind === "CONTRACT" ? { frozenSources: [{ proposalId: "proposal", media: [{ id: "unpublished" }] }] } : { mediaId: "unpublished" } });
+    assert.throws(() => planProposalRetention(snapshot, payload, retentionTime), error => error instanceof RetentionError && error.retryable);
+    snapshot.jobs[1].leaseUntil = new Date(retentionTime.getTime()-1);
+    assert.ok(planProposalRetention(snapshot, payload, retentionTime).targets.length > 0);
   }
 });
 
@@ -67,6 +38,10 @@ test("unattached images protect every current/issued reference and reject forged
     projectId: "project", operationJobId: "upload", binding: media.binding, objects: [media.original!, media.optimized!] };
   assert.equal(planProposalRetention(snapshot, payload, retentionTime).targets.length, 0);
   snapshot.currentMediaIds = []; snapshot.versions = [];
+  assert.equal(planProposalRetention(snapshot, payload, retentionTime).targets.length, 0, "READY без связей остаётся доступным");
+  media.uploadState = "PENDING"; snapshot.jobs[0].state = "SUCCEEDED";
+  assert.equal(planProposalRetention(snapshot, payload, retentionTime).targets.length, 0, "подтверждённая операция сохраняется");
+  snapshot.jobs[0].state = "FAILED";
   assert.equal(planProposalRetention(snapshot, payload, retentionTime).targets.length, 2);
   assert.throws(() => planProposalRetention(snapshot, { ...payload, objects: [{ ...media.optimized!, sha256: "a".repeat(64) }] }, retentionTime), /FACTS_CHANGED/);
 });
@@ -79,14 +54,10 @@ test("retired copies require exact source ledger, absence of covers aliases and 
     retiredAt: retentionTime, sourceItemId: "item", sourceMediaId: "shared", copyJobId: "copy-job", coverReferences: 0, aliases: 0, pendingDelete: false });
   const payload: RetentionPayload = { schema: 1, kind: "RETIRED_PRODUCT_COPY", proposalId: "proposal", sourceMediaId: "shared", projectId: "project", fileId: "file",
     storedName: key.split("/")[1], operationJobId: "copy-job", binding: retentionBinding, objects: [object] };
-  assert.deepEqual(planProposalRetention(snapshot, payload, retentionTime).targets.map(target => target.key), [key]);
-  for (const field of ["coverReferences", "aliases", "pendingDelete"] as const) {
-    const row = snapshot.files[0]; if (field === "pendingDelete") row.pendingDelete = true; else row[field] = 1;
-    assert.throws(() => planProposalRetention(snapshot, payload, retentionTime), /REFERENCED/);
-    row.coverReferences = 0; row.aliases = 0; row.pendingDelete = false;
-  }
-  snapshot.pendingFileKeys = [key]; snapshot.files = [];
-  assert.throws(() => planProposalRetention(snapshot, payload, retentionTime), /REFERENCED/);
+  assert.deepEqual(planProposalRetention(snapshot, payload, retentionTime).targets, []);
+  assert.deepEqual(planProposalRetention(snapshot, { ...payload, kind: "UNATTACHED_PRODUCT_COPY", mediaId: "shared" },
+    retentionTime).targets, []);
+
 });
 
 test("unused failed PDF/DOCX artifacts use authoritative attempt-key and issued history is preserved", () => {
@@ -114,7 +85,7 @@ test("pending archive blocks annual purge; its exact orphan artifact requires un
   const orphan: RetentionPayload = { schema: 1, kind: "ORPHAN_ARCHIVE_ARTIFACT", proposalId: "proposal", artifactId: artifact.id, operationJobId: "archive-upload",
     archiveReserveReceiptId: "kp.archive.reserve:"+manifestHash, archiveManifestHash: manifestHash, binding: retentionBinding, objects: [artifact.object] };
   assert.equal(planProposalRetention(snapshot, orphan, retentionTime).targets.length, 1);
-  assert.throws(() => planProposalRetention(snapshot, { schema: 1, kind: "ANNUAL_MEDIA", proposalId: "proposal", expiresAt: "2021-01-01T00:00:00.000Z" }, retentionTime), /REFERENCED/);
+  assert.deepEqual(planProposalRetention(snapshot, { schema: 1, kind: "ANNUAL_MEDIA", proposalId: "proposal", expiresAt: "2021-01-01T00:00:00.000Z" }, retentionTime).targets, []);
   snapshot.archiveReservations[0].published = true;
   assert.equal(planProposalRetention(snapshot, orphan, retentionTime).targets.length, 0);
   snapshot.archiveReservations[0].published = false; snapshot.archiveReservations[0].objects[0].sha256 = "f".repeat(64);
@@ -122,7 +93,8 @@ test("pending archive blocks annual purge; its exact orphan artifact requires un
 });
 
 test("exact scope rejects path escape, URLs and malformed cleanups", () => {
-  const target = planProposalRetention(retentionSnapshot(), acceptedPayload, retentionTime).targets[0];
+  const snapshot = retentionSnapshot();
+  const target = planProposalRetention(snapshot, technicalCleanup(snapshot), retentionTime).targets[0];
   for (const key of ["kp/proposals/other/exports/a.pdf", "../x", "https://private.invalid/key", "/absolute", "kp/proposals/proposal/original/../x"])
     assert.throws(() => makeRetentionManifest("proposal", [{ ...target, key }], []));
   assert.throws(() => retentionPayload({ schema: 1, kind: "ACCEPTED_RETENTION", proposalId: "proposal", acceptedVersionId: "accepted", retentionEpoch: 2, arbitrary: true }));

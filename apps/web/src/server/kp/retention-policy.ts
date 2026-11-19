@@ -1,4 +1,4 @@
-import { RetentionError, makeRetentionManifest, retentionAnniversary, retentionHash, sameRetentionBinding,
+import { RetentionError, makeRetentionManifest, retentionHash, sameRetentionBinding,
   type RetentionBinding, type RetentionManifest, type RetentionObject, type RetentionPayload, type RetentionTarget } from "./retention-contract";
 
 export type RetentionJobRow = { id: string; kind: string; state: string; attempts: number; maxAttempts: number;
@@ -24,18 +24,16 @@ const plain = (value: unknown): Record<string, unknown> | null => value !== null
 export function retentionOperationActive(job: RetentionJobRow | undefined, now: Date): boolean {
   return !!job && (job.state === "PENDING" && job.attempts < job.maxAttempts || job.state === "PROCESSING" && !!job.leaseUntil && job.leaseUntil > now);
 }
-function activeSource(snapshot: RetentionSnapshot, now: Date, mediaId?: string, artifactId?: string): boolean {
+function activeSource(snapshot: RetentionSnapshot, now: Date, mediaId: string): boolean {
   return snapshot.jobs.some(job => {
     if (!retentionOperationActive(job, now)) return false;
     const payload = plain(job.payload);
-    if (["UPLOAD_MEDIA", "COPY_PRODUCT_MEDIA"].includes(job.kind)) return !!mediaId && payload?.mediaId === mediaId;
+    if (["UPLOAD_MEDIA", "COPY_PRODUCT_MEDIA"].includes(job.kind)) return payload?.mediaId === mediaId;
     if (!["PDF", "CONTRACT"].includes(job.kind)) return false;
     if (!Array.isArray(payload?.frozenSources)) throw new RetentionError("KP_RETENTION_LIVE_SNAPSHOT_INVALID");
     return payload.frozenSources.some(raw => {
       const source = plain(raw);
       if (!source || source.proposalId !== snapshot.proposal.id) return false;
-      if (!mediaId && !artifactId) return true;
-      if (artifactId) return source.retainedPdfArtifactId === artifactId;
       if (!Array.isArray(source.media)) throw new RetentionError("KP_RETENTION_LIVE_SNAPSHOT_INVALID");
       return source.media.some(value => plain(value)?.id === mediaId);
     });
@@ -53,56 +51,25 @@ function exactObjects(expected: RetentionObject[], actual: RetentionObject[], ex
   if (!sameRetentionBinding(expectedBinding, actualBinding) || canonical(expected) !== canonical(actual)) throw new RetentionError("KP_RETENTION_OBJECT_FACTS_CHANGED");
 }
 const defer = (): never => { throw new RetentionError("KP_RETENTION_REFERENCED", true); };
-export function shouldScheduleAcceptanceCleanup(snapshot:Pick<RetentionSnapshot,'proposal'|'inWorkTriggered'>):boolean{
-  return !!snapshot.proposal.acceptedVersionId&&!!snapshot.proposal.stage&&snapshot.proposal.stage!=='LEAD'&&
-    (snapshot.proposal.stage==='IN_WORK'||snapshot.inWorkTriggered);
+export function protectsPublishedHistory(kind: RetentionPayload["kind"]): boolean {
+  return kind === "ACCEPTED_RETENTION" || kind === "ANNUAL_MEDIA" || kind === "RETIRED_PRODUCT_COPY";
 }
 
 /** Чистая политика: только authoritative snapshot; никаких S3 list/prefix-предположений. */
 export function planProposalRetention(snapshot: RetentionSnapshot, payload: RetentionPayload, now: Date): RetentionManifest {
   if (snapshot.proposal.id !== payload.proposalId) throw new RetentionError("KP_RETENTION_OWNER_MISMATCH");
-  const targets: RetentionTarget[] = [], pruneVersionIds: string[] = [];
+  const targets: RetentionTarget[] = [];
   if (payload.kind === "CANCELLED_PROBE") throw new RetentionError("KP_RETENTION_PROBE_REQUIRED");
-  if (payload.kind === "ACCEPTED_RETENTION") {
-    if (!snapshot.proposal.stage || snapshot.proposal.stage === "LEAD" || snapshot.proposal.epoch !== payload.retentionEpoch ||
-      snapshot.proposal.acceptedVersionId !== payload.acceptedVersionId) throw new RetentionError("KP_RETENTION_CANCELLED");
-    const accepted = snapshot.versions.find(version => version.id === payload.acceptedVersionId);
-    if (!accepted?.pdfArtifactId) throw new RetentionError("KP_RETENTION_ACCEPTED_VERSION_INVALID");
-    const acceptedPdf = snapshot.artifacts.find(artifact => artifact.id === accepted.pdfArtifactId);
-    if (!acceptedPdf || acceptedPdf.kind !== "PDF" || acceptedPdf.proposalId !== snapshot.proposal.id || acceptedPdf.state !== "READY")
-      throw new RetentionError("KP_RETENTION_ACCEPTED_VERSION_INVALID");
-    if (activeSource(snapshot, now)) defer();
-    pruneVersionIds.push(...snapshot.versions.filter(version => version.id !== accepted.id).map(version => version.id));
-    const retained = new Set(accepted.mediaIds);
-    for (const media of snapshot.media) {
-      if (activeSource(snapshot, now, media.id)) defer();
-      if (media.original && !media.originalPurgedAt) targets.push(mediaTarget(media, "original"));
-      if (media.optimized && !media.optimizedPurgedAt && !retained.has(media.id)) targets.push(mediaTarget(media, "optimized"));
-    }
-    for (const artifact of snapshot.artifacts) {
-      if (artifact.kind !== "PDF" || artifact.proposalId !== snapshot.proposal.id || artifact.id === accepted.pdfArtifactId ||
-        artifact.state === "DELETED" || artifact.state === "PENDING") continue;
-      if (artifact.contractVersionIds.length || artifact.quoteVersionIds.some(id => !pruneVersionIds.includes(id))) continue;
-      if (activeSource(snapshot, now, undefined, artifact.id)) defer();
-      targets.push(artifactTarget(artifact));
-    }
-  } else if (payload.kind === "ANNUAL_MEDIA") {
-    const expiry = retentionAnniversary(snapshot.proposal.createdAt);
-    if (expiry.toISOString() !== payload.expiresAt || expiry > now) throw new RetentionError("KP_RETENTION_NOT_DUE", true);
-    for (const media of snapshot.media) {
-      if (activeSource(snapshot, now, media.id)) defer();
-      if (media.original && !media.originalPurgedAt) targets.push(mediaTarget(media, "original"));
-      if (media.optimized && !media.optimizedPurgedAt) targets.push(mediaTarget(media, "optimized"));
-    }
-    if (targets.length && snapshot.archiveReservations.some(reservation => !reservation.published)) defer();
-  } else if (payload.kind === "UNATTACHED_MEDIA") {
+  if (protectsPublishedHistory(payload.kind)) return makeRetentionManifest(payload.proposalId, [], []);
+  if (payload.kind === "UNATTACHED_MEDIA") {
     const media = snapshot.media.find(value => value.id === payload.mediaId);
     const operation=snapshot.jobs.find(job=>job.id===payload.operationJobId), source=plain(operation?.payload);
     if (!media || media.uploadJobId!==payload.operationJobId || operation?.kind!=='UPLOAD_MEDIA' ||
       source?.mediaId!==media.id || source.proposalId!==payload.proposalId) throw new RetentionError("KP_RETENTION_OWNER_MISMATCH");
     exactObjects(payload.objects, [media.original, media.optimized].filter((value): value is RetentionObject => !!value), payload.binding, media.binding);
     exactObjects(payload.objects,[plain(source.original),plain(source.optimized)].filter((value):value is Record<string,unknown>=>!!value)as RetentionObject[],payload.binding,source.binding as RetentionBinding);
-    if (snapshot.currentMediaIds.includes(media.id) || snapshot.versions.some(version => version.mediaIds.includes(media.id)))
+    if (media.uploadState !== "PENDING" || operation.state === "SUCCEEDED" ||
+      snapshot.currentMediaIds.includes(media.id) || snapshot.versions.some(version => version.mediaIds.includes(media.id)))
       return makeRetentionManifest(payload.proposalId, [], []);
     if (retentionOperationActive(snapshot.jobs.find(job => job.id === payload.operationJobId), now) || activeSource(snapshot, now, media.id)) defer();
     if (media.original && !media.originalPurgedAt) targets.push(mediaTarget(media, "original"));
@@ -133,11 +100,11 @@ export function planProposalRetention(snapshot: RetentionSnapshot, payload: Rete
     if (artifact.object.key !== `kp/${owner}/exports/${job.id}-${payload.attempt}-${artifact.id}.${extension}`)
       throw new RetentionError("KP_RETENTION_ARTIFACT_CLAIM_MISMATCH");
     targets.push(artifactTarget(artifact));
-  } else {
+  } else if (payload.kind === "UNATTACHED_PRODUCT_COPY") {
     const job = snapshot.jobs.find(value => value.id === payload.operationJobId), data = plain(job?.payload), optimized = plain(data?.optimized);
     if (!job || job.kind !== "COPY_PRODUCT_MEDIA" || !data || data.fileId !== payload.fileId || data.projectId !== payload.projectId ||
       data.proposalId !== payload.proposalId || data.storedName !== payload.storedName || !optimized || snapshot.proposal.projectId!==payload.projectId ||
-      data.mediaId!==(payload.kind==='RETIRED_PRODUCT_COPY'?payload.sourceMediaId:payload.mediaId))
+      data.mediaId!==payload.mediaId)
       throw new RetentionError("KP_RETENTION_COPY_OWNER_MISMATCH");
     exactObjects(payload.objects, [optimized as RetentionObject], payload.binding, data.binding as RetentionBinding);
     const file = snapshot.files.find(value => value.id === payload.fileId);
@@ -145,12 +112,10 @@ export function planProposalRetention(snapshot: RetentionSnapshot, payload: Rete
       file.sourceItemId!==data.itemId||file.sourceMediaId!==data.mediaId))throw new RetentionError('KP_RETENTION_COPY_OWNER_MISMATCH');
     if (snapshot.pendingFileKeys.includes(payload.objects[0].key)) defer();
     if (snapshot.files.some(value => value.id !== payload.fileId && value.projectId === payload.projectId && value.storedName === payload.storedName)) defer();
-    if (payload.kind === "UNATTACHED_PRODUCT_COPY" && file) return makeRetentionManifest(payload.proposalId, [], []);
+    if (file || plain(job.result)?.attached === true) return makeRetentionManifest(payload.proposalId, [], []);
     if (retentionOperationActive(job, now)) defer();
-    if (file && (!file.retiredAt || file.coverReferences || file.aliases || file.pendingDelete)) defer();
-    if (file?.hasThumb) throw new RetentionError("KP_RETENTION_UNEXPECTED_THUMBNAIL");
     targets.push({ ...payload.objects[0], id: `copy:${payload.fileId}`, entity: "PRODUCT_COPY", entityId: payload.fileId,
       binding: payload.binding, projectId: payload.projectId, storedName: payload.storedName, operationJobId: payload.operationJobId });
   }
-  return makeRetentionManifest(payload.proposalId, targets, pruneVersionIds);
+  return makeRetentionManifest(payload.proposalId, targets, []);
 }

@@ -126,7 +126,7 @@ test("a pending artifact from an older attempt cannot be attached to the new cla
   assert.equal(f.state.versions.size, 0); assert.equal(f.state.artifacts.get(artifact.id)?.state, "PENDING");
 });
 
-test("stage gate requires current release even with module off; acceptance, prune and Lead return preserve history", async () => {
+test("stage gate requires current release even with module off; acceptance and Lead return preserve history", async () => {
   const f = lifecycleFixture(), gate = { projectId: "project1", fromStage: "LEAD" as const, toStage: "IN_WORK" as const, at: f.state.now };
   Object.assign(f.state.proposal, { isArchive: true });
   f.ports.enabled = false;
@@ -135,10 +135,10 @@ test("stage gate requires current release even with module off; acceptance, prun
   f.ports.enabled = true; const version = await release(f); f.ports.enabled = false;
   await f.transaction(store => applyProposalStageGate(store, gate));
   assert.equal(f.state.proposal.acceptedVersionId, version.id); assert.equal(f.state.proposal.retentionEpoch, 1); assert.ok(f.state.acceptedAt);
-  assert.deepEqual(f.state.cleanup.map(row => [row.versionId, row.epoch, row.state]), [[version.id, 1, "PENDING"]]);
+  assert.equal(f.state.cleanup.length, 0);
   await f.transaction(store => applyProposalStageGate(store, { ...gate, fromStage: "IN_WORK", toStage: "LEAD" }));
   assert.equal(f.state.proposal.acceptedVersionId, null); assert.equal(f.state.acceptedAt, null); assert.equal(f.state.proposal.retentionEpoch, 2);
-  assert.equal(f.state.cleanup[0].state, "CANCELLED"); assert.equal(f.state.versions.size, 1);
+  assert.equal(f.state.cleanup.length, 0); assert.equal(f.state.versions.size, 1);
 });
 
 test("frozen download UUID remains bound to its accepted PDF after return to Lead", async () => {
@@ -151,7 +151,7 @@ test("frozen download UUID remains bound to its accepted PDF after return to Lea
   await assert.rejects(request(f, operationId), isCode("KP_OPERATION_REUSED"));
 });
 
-test("restore delegates historical binding, full state and fixed FX; expired images give410 while frozen PDF still downloads", async () => {
+test("restore delegates historical binding, full state and fixed FX; historical media and frozen PDF remain available after the anniversary", async () => {
   const f = lifecycleFixture();
   Object.assign(f.state.proposal, { isArchive: true });
   const version = await release(f), historicState = structuredClone(version.state);
@@ -173,8 +173,9 @@ test("restore delegates historical binding, full state and fixed FX; expired ima
   const download = await f.transaction(store => readVersionPdf(store, f.binding, "proposal1", version.id)); assert.equal(download.artifact.id, version.pdfArtifactId);
   const reused = await request(f); assert.equal(reused.kind, "retained"); assert.equal(f.state.jobs.size, 1);
   f.state.project.stage = "LEAD";
-  await assert.rejects(f.transaction(store => restoreProposalVersion(store, f.binding, { ...command, expectedRevision: 3, operationId: randomUUID() }, f.ports, save)), error => error instanceof ProposalLifecycleError && error.status === 410);
-  assert.equal(calls, 1); assert.equal(f.state.proposal.revision, 3);
+  const afterAnniversary = await f.transaction(store => restoreProposalVersion(store, f.binding,
+    { ...command, expectedRevision: 3, operationId: randomUUID() }, f.ports, save));
+  assert.equal(afterAnniversary.revision, 4); assert.equal(calls, 2);
 });
 
 test("release and restore keep the saved quote customer after independent CRM edits", async () => {

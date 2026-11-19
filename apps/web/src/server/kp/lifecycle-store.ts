@@ -47,9 +47,9 @@ export function createPrismaLifecycleStore(tx: Prisma.TransactionClient, securit
     proposalByProject(projectId) { return one<ProposalRecord>(Prisma.sql`SELECT ${proposalColumns} FROM "CommercialProposal" c WHERE c."projectId"=${projectId} FOR UPDATE`); },
     media(proposalId, scope) {
       const ownership = scope.kind === "current"
-        ? Prisma.sql`EXISTS(SELECT 1 FROM "ProposalCurrentMedia" u WHERE u."proposalId"=m."proposalId" AND u."mediaId"=m."id")`
+        ? Prisma.sql`EXISTS(SELECT 1 FROM "ProposalCurrentMedia" u WHERE u."proposalId"=m."proposalId" AND u."mediaId"=m."id" AND u."detachedAt" IS NULL)`
         : Prisma.sql`EXISTS(SELECT 1 FROM "ProposalVersionMedia" u WHERE u."proposalId"=m."proposalId" AND u."mediaId"=m."id" AND u."versionId"=${scope.versionId})`;
-      return tx.$queryRaw<MediaRecord[]>(Prisma.sql`SELECT m."id",m."proposalId",m."storageBinding",m."optimizedKey",m."optimizedHash",m."optimizedSize",to_jsonb(m)->>'optimizedMimeType' AS "optimizedMimeType",m."mimeType",m."fileName",m."expiresAt" AT TIME ZONE 'UTC' AS "expiresAt",m."optimizedPurgedAt",m."retiringAt",to_jsonb(m)->>'uploadState' AS "uploadState" FROM "ProposalMedia" m WHERE m."proposalId"=${proposalId} AND ${ownership} ORDER BY m."id" FOR UPDATE OF m`);
+      return tx.$queryRaw<MediaRecord[]>(Prisma.sql`SELECT m."id",m."proposalId",m."storageBinding",m."optimizedKey",m."optimizedHash",m."optimizedSize",to_jsonb(m)->>'optimizedMimeType' AS "optimizedMimeType",m."mimeType",m."fileName",m."expiresAt" AT TIME ZONE 'UTC' AS "expiresAt",m."optimizedPurgedAt",m."retiringAt",to_jsonb(m)->>'uploadState' AS "uploadState" FROM "ProposalMedia" m WHERE m."proposalId"=${proposalId} AND m."deletedAt" IS NULL AND ${ownership} ORDER BY m."id" FOR UPDATE OF m`);
     },
     version(proposalId, versionId) { return one<VersionRecord>(Prisma.sql`SELECT ${versionColumns} FROM "ProposalVersion" v WHERE v."proposalId"=${proposalId} AND v."id"=${versionId} FOR SHARE`); },
     versions(proposalId) { return tx.$queryRaw<VersionRecord[]>(Prisma.sql`SELECT ${versionColumns} FROM "ProposalVersion" v WHERE v."proposalId"=${proposalId} ORDER BY v."createdAt" DESC,v."id" DESC`); },
@@ -105,10 +105,6 @@ export function createPrismaLifecycleStore(tx: Prisma.TransactionClient, securit
     },
     async cancelPruneJobs(proposalId) {
       await tx.$executeRaw`UPDATE "ProposalJob" SET "state"='CANCELLED',"leaseOwner"=NULL,"leaseUntil"=NULL,"updatedAt"=clock_timestamp() AT TIME ZONE 'UTC' WHERE "proposalId"=${proposalId} AND "kind"='PRUNE_VERSIONS' AND "state" IN ('PENDING','PROCESSING','FAILED')`;
-    },
-    async enqueuePrune(input) {
-      const id = `kp_prune_${input.proposalId}_${input.epoch}`, dedupe = `kp:prune:${input.proposalId}:${input.epoch}`;
-      await tx.$executeRaw`INSERT INTO "ProposalJob"("id","proposalId","kind","state","dedupeKey","payload","retentionEpoch","createdAt","updatedAt") VALUES(${id},${input.proposalId},'PRUNE_VERSIONS','PENDING',${dedupe},${JSON.stringify({ schema: 1, kind: "ACCEPTED_RETENTION", proposalId: input.proposalId, acceptedVersionId: input.versionId, retentionEpoch: input.epoch })}::jsonb,${input.epoch},clock_timestamp() AT TIME ZONE 'UTC',clock_timestamp() AT TIME ZONE 'UTC') ON CONFLICT("dedupeKey") DO NOTHING`;
     },
     async receipt(id, action = "version.restore") {
       const row = await tx.changeLog.findUnique({ where: { id } });
