@@ -16,7 +16,7 @@ const settings = { email: initial.email, name: "Иван Новый", position: 
 
 function fixture({ securityTrigger = false } = {}) {
   let row = structuredClone({ ...initial, payPercent: "5" });
-  const audits: Prisma.ChangeLogCreateInput[] = [];
+  const audits: Prisma.ChangeLogUncheckedCreateInput[] = [];
   let rejectAudit = false, writes = 0, dependency: string | null = null, otherAdmins = 1;
   const tx = { $queryRaw: async () => [{ id: "employee", acquired: true }],
     task: { findFirst: async () => dependency === "task" ? { id: "open-task" } : null },
@@ -32,7 +32,7 @@ function fixture({ securityTrigger = false } = {}) {
     create: async ({ data }: { data: Record<string, unknown> }) => { writes++; row = { ...row, ...data } as typeof row; return row; },
     update: async ({ data }: { data: Record<string, unknown> }) => { writes++; const changed = Object.entries(data).some(([key, value]) => key !== "calendarEnabled" && JSON.stringify(row[key as keyof typeof row]) !== JSON.stringify(value));
       row = { ...row, ...data, accountRevision: row.accountRevision + Number(changed), sessionVersion: typeof data.sessionVersion === "object" || (securityTrigger && (data.active !== row.active || data.passwordHash)) ? row.sessionVersion + 1 : row.sessionVersion } as typeof row; return row; },
-  }, apiToken: { findMany: async () => [] }, changeLog: { create: async ({ data }: { data: Prisma.ChangeLogCreateInput }) => { if (rejectAudit) throw new Error("AUDIT_FAILED"); audits.push(data); return { id: `audit-${audits.length}`, ...data }; } } };
+  }, apiToken: { findMany: async () => [] }, changeLog: { create: async ({ data }: { data: Prisma.ChangeLogUncheckedCreateInput }) => { if (rejectAudit) throw new Error("AUDIT_FAILED"); audits.push(data); return { id: `audit-${audits.length}`, ...data }; } } };
   return { tx: tx as unknown as Prisma.TransactionClient, audits, get row() { return row; }, get writes() { return writes; }, setDependency: (value: string | null) => { dependency = value; }, setOtherAdmins: (value: number) => { otherAdmins = value; }, fail: () => { rejectAudit = true; } };
 }
 
@@ -76,13 +76,13 @@ test("creation and session revocation have full safe snapshots", async () => {
 });
 
 test("actual trigger consequences are attributed to System without altering role or token semantics", async () => {
-  const audits: Prisma.ChangeLogCreateInput[] = [];
+  const audits: Prisma.ChangeLogUncheckedCreateInput[] = [];
   const before = { ...initial }, token = { id: "owned-token", name: "Интеграция", prefix: "pero_x", scopes: ["read"], pluginId: null,
     createdById: initial.id, createdAt: new Date("2026-01-01T00:00:00Z"), revokedAt: null as Date | null, tokenHash: "private-token-hash" };
   const tx = { $queryRaw: async () => [], user: { findUnique: async () => before, findFirst: async () => null,
     update: async ({ data }: { data: Record<string, unknown> }) => { token.revokedAt = new Date(); return { ...before, ...data, sessionVersion: 1 }; } },
     apiToken: { findMany: async () => [{ ...token }] },
-    changeLog: { create: async ({ data }: { data: Prisma.ChangeLogCreateInput }) => { audits.push(data); return { id: `event-${audits.length}`, ...data }; } },
+    changeLog: { create: async ({ data }: { data: Prisma.ChangeLogUncheckedCreateInput }) => { audits.push(data); return { id: `event-${audits.length}`, ...data }; } },
   } as unknown as Prisma.TransactionClient;
   await updateUserInTransaction(tx, admin, initial.id, settings);
   assert.deepEqual(audits.map(row => [row.actorType, row.entity, row.action]), [["user", "user", "update"], ["system", "user", "revokeSessions"], ["system", "apiToken", "revoke"]]);
