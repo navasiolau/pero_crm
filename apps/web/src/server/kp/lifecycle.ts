@@ -24,17 +24,17 @@ function liveSource(source: SourceRecord | null): LiveSource {
 function mutable(source: LiveSource) {
   if (source.project.stage !== "LEAD") lifecycleFailure("KP_PROPOSAL_LOCKED", 409, "Редактирование КП доступно только в Лиде");
 }
-function freezeMedia(row: MediaRecord, proposalId: string, now: Date): FrozenMedia {
-  if (row.proposalId !== proposalId || row.uploadState !== "READY" || row.retiringAt || row.optimizedPurgedAt || row.expiresAt <= now || !row.optimizedKey || !row.optimizedHash || !row.optimizedSize) lifecycleFailure("KP_MEDIA_UNAVAILABLE", 410, "Изображение версии удалено или недоступно");
+function freezeMedia(row: MediaRecord, proposalId: string): FrozenMedia {
+  if (row.proposalId !== proposalId || row.uploadState !== "READY" || row.retiringAt || row.optimizedPurgedAt || !row.optimizedKey || !row.optimizedHash || !row.optimizedSize) lifecycleFailure("KP_MEDIA_UNAVAILABLE", 410, "Изображение версии удалено или недоступно");
   return { id: row.id, binding: lifecycleClone(row.storageBinding), key: row.optimizedKey, sha256: row.optimizedHash, size: row.optimizedSize, mimeType: row.optimizedMimeType ?? row.mimeType, fileName: row.fileName };
 }
 async function mediaSnapshot(store: ProposalLifecycleStore, proposal: ProposalRecord, ports: LifecyclePorts, scope: { kind: "current" } | { kind: "version"; versionId: string }) {
   const ids = [...new Set(ports.mediaIds(proposal.state))].sort();
-  const rows = await store.media(proposal.id, scope), now = await store.now();
+  const rows = await store.media(proposal.id, scope);
   return ids.map(id => {
     const row = rows.find(media => media.id === id);
     if (!row) lifecycleFailure("KP_MEDIA_UNAVAILABLE", 410, "Изображение версии удалено или недоступно");
-    return freezeMedia(row, proposal.id, now);
+    return freezeMedia(row, proposal.id);
   });
 }
 function versionSource(version: VersionRecord, source: LiveSource): FrozenProposalSource {
@@ -219,7 +219,6 @@ export async function applyProposalStageGate(store: ProposalLifecycleStore, inpu
     if (retained.version.revision !== proposal.revision) lifecycleFailure("KP_REVISION_CHANGED");
   }
   if (input.fromStage === "LEAD") await store.accept(proposal.id, acceptedVersionId, input.at, epoch);
-  if (input.toStage === "IN_WORK" && acceptedVersionId) await store.enqueuePrune({ proposalId: proposal.id, versionId: acceptedVersionId, epoch, at: input.at });
 }
 
 async function authorizeRead(store: ProposalLifecycleStore, binding: ActorBinding, proposalId: string) {

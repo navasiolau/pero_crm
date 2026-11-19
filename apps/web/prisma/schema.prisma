@@ -1755,6 +1755,7 @@ model ProposalMedia {
 }
 
 model ProposalCurrentMedia {
+  detachedAt DateTime?
   proposalId String
   mediaId    String
   proposal   CommercialProposal @relation(fields: [proposalId], references: [id], onDelete: Restrict)
@@ -1815,6 +1816,7 @@ model ProposalContract {
 }
 
 model ProposalContractSource {
+  detachedAt DateTime?
   contractId String
   proposalId String
   position   Int
@@ -1822,7 +1824,6 @@ model ProposalContractSource {
   proposal   CommercialProposal @relation(fields: [proposalId], references: [id], onDelete: Restrict)
 
   @@id([contractId, proposalId])
-  @@unique([contractId, position])
   @@index([proposalId])
 }
 

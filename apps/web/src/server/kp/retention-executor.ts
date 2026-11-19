@@ -1,5 +1,6 @@
 import { RetentionError, assertRetentionTarget, sameRetentionBinding, type RetentionBinding, type RetentionClaim,
   type RetentionPayload, type RetentionProgress, type RetentionTarget, type StoredVersion } from "./retention-contract";
+import { protectsPublishedHistory } from "./retention-policy";
 
 export type ListedVersion = { key: string; id: string; marker: boolean };
 export type VersionCursor = { key: string; version?: string };
@@ -69,6 +70,7 @@ async function exactVersions(dependencies: RetentionDependencies, claim: Retenti
 export async function executeProposalRetention(dependencies: RetentionDependencies, claim: RetentionClaim): Promise<void> {
   await checked(dependencies, claim);
   const { payload, progress } = await dependencies.repository.prepare(claim);
+  if (protectsPublishedHistory(payload.kind)) throw new RetentionError("KP_RETENTION_CANCELLED");
   let unresolvedProbe=false;
   for (const target of progress.manifest.targets) {
     assertRetentionTarget(claim.proposalId, target);

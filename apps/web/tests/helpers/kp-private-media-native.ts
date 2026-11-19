@@ -129,30 +129,30 @@ export async function verifyKpPrivateMediaNative(tx: Prisma.TransactionClient, r
     const [retired] = await tx.$queryRaw<{ proposalMediaRetiredAt: Date | null }[]>`SELECT "proposalMediaRetiredAt" FROM "File" WHERE id = ${firstCopy.id}`;
     assert.ok(retired.proposalMediaRetiredAt);
     assert.notEqual((await tx.product.findUniqueOrThrow({ where: { id: productId } })).sketchFileId, firstCopy.id);
-    const [retireJob] = await tx.$queryRaw<{ payload: { objects: { key: string }[]; fileId: string } }[]>`SELECT payload FROM "ProposalJob"
+    const retireJobs = await tx.$queryRaw<{id:string}[]>`SELECT id FROM "ProposalJob"
       WHERE "proposalId" = ${proposalId} AND payload->>'kind' = 'RETIRED_PRODUCT_COPY' AND payload->>'fileId' = ${firstCopy.id}`;
-    assert.equal(retireJob.payload.fileId, firstCopy.id);
-    assert.deepEqual(retireJob.payload.objects.map(object => object.key), [`${projectId}/${firstCopy.storedName}`]);
+    assert.equal(retireJobs.length, 0);
     assert.ok(await tx.file.findUnique({ where: { id: manual.id } }));
-    for (const key of [...objects.keys()]) if (key.startsWith("kp/")) objects.delete(key);
-    const [activeCopy] = await tx.$queryRaw<{ storedName: string }[]>`SELECT "storedName" FROM "File"
-      WHERE "proposalSourceMediaId" = ${second.mediaId} AND "proposalMediaRetiredAt" IS NULL`;
-    assert.ok(objects.has(`${projectId}/${activeCopy.storedName}`));
-    checks.push("native-retirement-exact-intent-product-copy-survives-kp-purge");
+    assert.ok(objects.has(projectId + "/" + firstCopy.storedName));
+    await assert.rejects(readProposalMedia(dependencies,{actorId:managerId,proposalId,mediaId:first.mediaId,variant:"original",scope:{kind:"current"}}),
+      error => error instanceof ProposalMediaError && error.code === "KP_MEDIA_NOT_FOUND");
+    await assert.rejects(readProposalMedia(dependencies,{actorId:managerId,proposalId,mediaId:first.mediaId,variant:"original",scope:{kind:"uploaded"}}),
+      error => error instanceof ProposalMediaError && error.code === "KP_MEDIA_NOT_FOUND");
 
     await tx.$executeRaw`UPDATE "CommercialProposal" SET "createdAt" = ${new Date("2000-01-01T00:00:00Z")} WHERE id = ${proposalId}`;
-    await tx.$executeRaw`UPDATE "ProposalMedia" SET "expiresAt" = ${new Date("2001-01-01T00:00:00Z")},
-      "originalPurgedAt" = ${now}, "optimizedPurgedAt" = ${now}, "retiringAt" = ${now} WHERE "proposalId" = ${proposalId}`;
-    const beforeExpiredUpload = objects.size;
-    await assert.rejects(uploadProposalImage(dependencies, { ...operation, operationId: randomUUID(), original, fileName: "Too-old.png" }),
-      error => error instanceof ProposalMediaError && error.code === "KP_MEDIA_EXPIRED");
-    assert.equal(objects.size, beforeExpiredUpload);
-    const oldPrepared = await prepareProposalProductMedia(dependencies, { ...operation, operationId: randomUUID(), ...nextState });
-    assert.deepEqual(oldPrepared.jobs, []);
-    assert.equal((await linkProposalProductMediaInTransaction(tx, { ...context, state: nextState }, { storage, preparedCopies: oldPrepared, now })).changed, false);
-    await linkProposalProductMediaInTransaction(tx, { ...context, state: { items: [{ id: itemId }] } }, { storage, now });
-    await tx.$executeRaw`UPDATE "CommercialProposal" SET "createdAt" = ${now} WHERE id = ${proposalId}`;
-    checks.push("native-expired-source-text-save-reuses-independent-file-upload-rejected-before-storage");
+    await tx.$executeRaw`UPDATE "ProposalMedia" SET "expiresAt" = ${new Date("2001-01-01T00:00:00Z")} WHERE "proposalId" = ${proposalId}`;
+    const overdue = await uploadProposalImage(dependencies, { ...operation, operationId: randomUUID(), original, fileName: "Retained.png" });
+    assert.equal((await readProposalMedia(dependencies,
+      {actorId:managerId,proposalId,mediaId:overdue.mediaId,variant:"original",scope:{kind:"uploaded"}})).bytes.length, original.length);
+
+    const recoveredState = { items: [{ id: itemId, image: first.reference }] };
+    const recoveredPlan = await prepareProposalProductMedia(dependencies, { ...operation, operationId: randomUUID(), ...recoveredState });
+    assert.deepEqual(recoveredPlan.jobs, []);
+    assert.equal((await linkProposalProductMediaInTransaction(tx, { ...context, state: recoveredState }, { storage, preparedCopies: recoveredPlan, now })).changed, true);
+    assert.equal((await tx.file.findUniqueOrThrow({ where: { id:firstCopy.id } })).proposalMediaRetiredAt, null);
+    assert.equal((await tx.product.findUniqueOrThrow({ where: { id:productId } })).sketchFileId, firstCopy.id);
+    assert.ok(objects.has(projectId + "/" + firstCopy.storedName));
+    checks.push("native-aged-media-reads-and-same-id-restoration");
 
     control.onPut = async () => { await tx.project.update({ where: { id: projectId }, data: { stage: "ESTIMATE" } }); };
     await assert.rejects(uploadProposalImage(dependencies, { ...operation, operationId: randomUUID(), original, fileName: "Locked.png" }),

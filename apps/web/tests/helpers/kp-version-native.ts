@@ -69,13 +69,9 @@ export async function verifyKpVersionNative(tx: Prisma.TransactionClient, input:
   assert.equal(frozenDownload.kind, "retained");
   assert.equal((await patchProjectStageTransaction(actor, { projectId, expectedStage: "CONTRACT", toStage: "IN_WORK", clientMutationId: randomUUID() }, tx)).result.ok, true);
   const cleanup = await tx.$queryRaw<{ id: string; retentionEpoch: number; state: string; payload: { kind: string; acceptedVersionId: string; retentionEpoch: number } }[]>`SELECT "id","retentionEpoch","state"::text AS state,"payload" FROM "ProposalJob" WHERE "proposalId"=${input.proposalId} AND "kind"='PRUNE_VERSIONS'`;
-  assert.equal(cleanup.length, 1); assert.equal(cleanup[0].payload.kind, "ACCEPTED_RETENTION"); assert.equal(cleanup[0].payload.acceptedVersionId, version.id);
-  assert.equal(cleanup[0].retentionEpoch, accepted?.retentionEpoch);
-  assert.equal(await queue.claim(["PDF"], randomUUID(), 60000, cleanup[0].id), null, "KP185_RENDER_QUEUE_NEVER_STEALS_CLEANUP");
+  assert.equal(cleanup.length, 0);
   assert.equal((await patchProjectStageTransaction(actor, { projectId, expectedStage: "IN_WORK", toStage: "LEAD", clientMutationId: randomUUID() }, tx)).result.ok, true);
   const reopened = await store.proposalByProject(projectId); assert.equal(reopened?.acceptedVersionId, null); assert.equal(reopened?.retentionEpoch, accepted!.retentionEpoch + 1);
-  const cancelled = await tx.$queryRaw<{ state: string }[]>`SELECT "state"::text AS state FROM "ProposalJob" WHERE "id"=${cleanup[0].id}`;
-  assert.deepEqual(cancelled, [{ state: "CANCELLED" }]);
 
   const changed = await input.save(actor, { proposalId: input.proposalId, expectedRevision: revision, operationId: randomUUID(), clientId: frozen.binding.clientId,
     state: { ...frozen.state, qaRestoreMarker: input.runId }, fx: { currency: frozen.currency, rate: frozen.rate, rateDate: frozen.rateDate, rateSource: frozen.rateSource } });

@@ -81,7 +81,7 @@ export async function runContractDatabaseNativeCases(tx: Prisma.TransactionClien
     const request = { documentId: ids[0], expectedRevision: 0, operationId: randomUUID(), clientBaseline: form.clientBaseline, sourceRefs: refs, settings: form.settings };
     let saved = await workflow.saveDraft(actor, request);
     assert.deepEqual(await workflow.saveDraft(actor, request), saved);
-    const positions = () => tx.$queryRaw<{ proposalId: string; position: number }[]>`SELECT "proposalId",position FROM "ProposalContractSource" WHERE "contractId"=${String(saved.contractId)} ORDER BY position`;
+    const positions = () => tx.$queryRaw<{ proposalId: string; position: number }[]>`SELECT "proposalId",position FROM "ProposalContractSource" WHERE "contractId"=${String(saved.contractId)} AND "detachedAt" IS NULL ORDER BY position`;
     assert.deepEqual(await positions(), ids.map((proposalId, index) => ({ proposalId, position: index + 1 })));
     const singleSettings = structuredClone(form.settings); singleSettings.proposalIds = [ids[0]];
     saved = await workflow.saveDraft(actor, { documentId: ids[0], expectedRevision: saved.revision, operationId: randomUUID(),
