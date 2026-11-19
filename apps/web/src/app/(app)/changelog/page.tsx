@@ -1,5 +1,5 @@
 import { Journal } from "@/components/journal/journal";
-import { requireRole } from "@/server/require-role";
+import { requireAdmin } from "@/server/require-role";
 import type { JournalQueryInput } from "@/server/changelog/query-contract";
 
 export const dynamic = "force-dynamic";
@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export default async function ChangelogPage({ searchParams }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireRole(["ADMIN"]);
+  await requireAdmin();
   const params = await searchParams;
   const text = (key: string) => typeof params[key] === "string" ? params[key] : undefined;
   const sort = text("sort"), direction = text("dir");
