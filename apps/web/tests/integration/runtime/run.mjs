@@ -4,6 +4,7 @@ import path from 'node:path';
 import { CreateBucketCommand, PutBucketVersioningCommand, S3Client } from '@aws-sdk/client-s3';
 import { assertCiJob, assertCiPostgresTarget, assertCiRuntimeTarget, integrationFiles, requireCi } from './target.mjs';
 import { docker, inspectService, inspectWeb, proveImageMigrations, startMinio, startWeb } from './containers.mjs';
+import { proveRuntimePrivileges } from './runtime-privileges.mjs';
 import { cleanup, processOwner, recordProcesses } from './cleanup.mjs';
 
 const job = assertCiJob(), phase = process.argv[2] ?? 'all', cases = integrationFiles(phase);
@@ -23,6 +24,7 @@ if (phase === 'postgres') {
   requireCi(identity.database === 'pero_ci' && identity.role === 'ci_runner' && identity.primary && identity.major === 17 && identity.tables === 0, 'early-postgres-fresh');
   execFileSync(process.execPath, ['--test', 'tests/integration/runtime/target.test.mjs'], { stdio: 'inherit' });
   execFileSync('pnpm', ['exec', 'prisma', 'migrate', 'deploy', '--schema', 'prisma/schema.prisma'], { stdio: 'inherit' });
+  proveRuntimePrivileges(target);
   execFileSync('pnpm', ['exec', 'tsx', '--test', '--test-concurrency=1', ...cases], { stdio: 'inherit' });
   console.log(JSON.stringify({ ciRuntime: 'postgres-phase-complete', files: cases, elapsedMs: Date.now() - started,
     startedAt: new Date(started).toISOString(), finishedAt: new Date().toISOString() }));

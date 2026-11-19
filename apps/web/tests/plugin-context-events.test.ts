@@ -53,12 +53,14 @@ test("actual plugin context keeps explicit emitter, trusted actor/audit and nest
     const events = require("../src/server/plugins/events") as typeof import("../src/server/plugins/events");
     const sent: { type: string; payload: unknown; actor: string }[] = [];
     const ctx = await buildPluginContext("qa152", async (type, payload, actor) => { sent.push({ type, payload, actor }); });
-    await ctx.emit("qa152.direct", { value: 1 });
-    assert.deepEqual(sent, [{ type: "qa152.direct", payload: { value: 1 }, actor: "plugin:qa152" }]);
+    await ctx.emit("plugin.qa152.direct", { value: 1 });
+    assert.deepEqual(sent, [{ type: "plugin.qa152.direct", payload: { value: 1 }, actor: "plugin:qa152" }]);
     assert.equal(writes.length, 0, "the factory must use only the supplied emitter");
     assert.equal(ctx.actor, "plugin:qa152"); assert.deepEqual(ctx.settings, { configured: true });
     ctx.requirePermission("read"); assert.throws(() => ctx.requirePermission("write"));
-    await ctx.audit({ entity: "qa152", entityId: "owned", action: "check" });
+    await assert.rejects(ctx.audit({ entity: "project", entityId: "foreign", action: "update" }), /PLUGIN_AUDIT_SCOPE/);
+    assert.throws(() => ctx.emit(OBSOLETE_SKETCH_EVENT, {}), /PLUGIN_EVENT_SCOPE/);
+    await ctx.audit({ entity: "plugin", entityId: "qa152", action: "check" });
     assert.equal(audit[0].actorType, "plugin"); assert.equal(audit[0].actorId, "plugin:qa152");
     assert.equal(audit[0].source, "plugin"); assert.equal(audit[0].actorName, "Проверка");
     await ctx.logger.info("qa152-info"); await ctx.logger.error("qa152-error");
@@ -67,12 +69,12 @@ test("actual plugin context keeps explicit emitter, trusted actor/audit and nest
     const delivered: string[] = [];
     hook = async (event, current) => {
       delivered.push(event.type); assert.equal(current.actor, "plugin:qa152");
-      if (event.type === "qa152.parent") await current.emit("qa152.child", { parent: event.id });
+      if (event.type === "qa152.parent") await current.emit("plugin.qa152.child", { parent: event.id });
     };
     await events.emitDomainEvent("qa152.parent", { value: 2 }, "qa152-actor");
-    assert.deepEqual(delivered, ["qa152.parent", "qa152.child"]);
+    assert.deepEqual(delivered, ["qa152.parent", "plugin.qa152.child"]);
     assert.deepEqual(writes.map(({ type, actor }) => ({ type, actor })), [
-      { type: "qa152.parent", actor: "qa152-actor" }, { type: "qa152.child", actor: "plugin:qa152" },
+      { type: "qa152.parent", actor: "qa152-actor" }, { type: "plugin.qa152.child", actor: "plugin:qa152" },
     ]);
     assert.equal(fixture.rows.length, 2); assert.ok(fixture.rows.every(row => row.processedAt));
     assert.equal(logs.filter(entry => entry.status === "ok").length, 2);

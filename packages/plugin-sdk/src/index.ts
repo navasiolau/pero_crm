@@ -66,16 +66,26 @@ export interface AuditEntry {
   newValue?: unknown
 }
 
-/**
- * Контекст, который ядро даёт хукам и командам плагина.
- * `db` типизирован как unknown — пакет не зависит от @prisma/client хоста;
- * внутри доверенного плагина допустимо приведение к PrismaClient.
- */
+export interface PluginProjectReference {
+  id: string
+  number: string
+  title: string
+}
+
+/** Проекция чтения при projects:read. Бизнес-записи выполняет доменный вход хоста. */
+export interface PluginReadDatabase {
+  readonly project?: {
+    findUnique(input: { where: { id: string } }): Promise<PluginProjectReference | null>
+    findMany(input?: { take?: number }): Promise<PluginProjectReference[]>
+  }
+}
+
+/** Контекст хука или проверенной команды плагина. */
 export interface PluginContext {
   pluginId: string
   actor: string // "plugin:<id>"
   settings: Record<string, unknown>
-  db: unknown
+  db: PluginReadDatabase
   logger: PluginLogger
   audit: (entry: AuditEntry) => Promise<void>
   emit: (type: string, payload: unknown) => Promise<void>

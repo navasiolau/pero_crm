@@ -53,4 +53,5 @@ COPY --from=build /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=build /app/apps/web/public ./apps/web/public
 COPY apps/web/prisma apps/web/prisma
 EXPOSE 3000
-CMD ["sh", "-c", "prisma migrate deploy --schema apps/web/prisma/schema.prisma && node apps/web/server.js"]
+COPY apps/web/runtime-start.sh apps/web/runtime-start.sh
+CMD ["sh", "apps/web/runtime-start.sh"]

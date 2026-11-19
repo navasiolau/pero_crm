@@ -1,3 +1,4 @@
+import { assertPluginAuditEntry, assertPluginEventType, pluginReadDatabase } from "./read-database";
 import type { PluginContext } from "@pero/plugin-sdk";
 
 import { prisma } from "@/lib/prisma";
@@ -28,7 +29,7 @@ export async function buildPluginContext(
     pluginId,
     actor,
     settings,
-    db: prisma,
+    db: pluginReadDatabase(prisma, manifest.permissions),
     logger: {
       info: (message) =>
         logPluginRun({ pluginId, kind: "hook", status: "ok", message }),
@@ -36,6 +37,7 @@ export async function buildPluginContext(
         logPluginRun({ pluginId, kind: "hook", status: "error", message }),
     },
     audit: async (entry) => {
+      assertPluginAuditEntry(pluginId, entry);
       await writeChangeLogInTransaction(prisma, {
         actorType: "plugin",
         actorId: actor,
@@ -52,7 +54,10 @@ export async function buildPluginContext(
         ...(entry.entity === "plugin" && entry.entityId === pluginId ? { entity: { label: `Модуль ${manifest.name}`, href: `/settings/modules/${encodeURIComponent(pluginId)}` } } : {}),
       });
     },
-    emit: (type, payload) => emitter(type, payload, actor),
+    emit: (type, payload) => {
+      assertPluginEventType(pluginId, type);
+      return emitter(type, payload, actor);
+    },
     requirePermission: (permission: string) => {
       if (!manifest.permissions.includes(permission)) {
         throw new Error(

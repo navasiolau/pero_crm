@@ -1,0 +1,9 @@
+# Подключать после отдельной приёмки защищённого runtime LOGIN и мягких удалений.
+services:
+  web:
+    environment:
+      DATABASE_URL: ${CRM_RUNTIME_DATABASE_URL:?Укажите ограниченный DATABASE_URL}
+      PERO_DB_ENFORCE_RUNTIME: '1'
+      DB_PASSWORD: ''
+      DATABASE_MIGRATION_URL: ''
+      CRM_RUNTIME_DATABASE_URL: ''
