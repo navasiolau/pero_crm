@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { auth } from "@/auth";
+import { scopedFinanceAuth, financeSessionSource } from "@/server/telegram/finance-session";
 import { prisma } from "@/lib/prisma";
 import { productDraftVisibilityWhere } from "@/server/access/visibility";
 import { dispatchEvent } from "@/server/plugins/events";
@@ -11,10 +11,10 @@ import { withMutationTransaction } from "@/server/transactions/coordinator";
 import { loadReallocation, prepareReallocation, redistributeTripInTransaction, requireReallocationActor } from "./reallocation-core";
 import { normalizeShipmentLine, reallocationInputSchema } from "./reallocation-contract";
 
-async function actorId() {
-  const id = (await auth())?.user.id;
-  if (!id) throw Error("Недостаточно прав для распределения рейса");
-  return id;
+async function reallocationSession() {
+  const session = await scopedFinanceAuth();
+  if (!session?.user.id) throw Error("Недостаточно прав для распределения рейса");
+  return session;
 }
 
 function failure(error: unknown) {
@@ -24,7 +24,7 @@ function failure(error: unknown) {
 
 export async function readTripReallocation(paymentId: string) {
   try {
-    const id = await actorId();
+    const id = (await reallocationSession()).user.id;
     return await prisma.$transaction(async tx => {
       const actor = await requireReallocationActor(tx, id);
       const payment = await tx.payment.findUnique({ where: { id: z.string().min(1).max(128).parse(paymentId) },
@@ -52,7 +52,7 @@ export async function readTripReallocation(paymentId: string) {
 
 export async function readTripReallocationProducts(rawProjectId: string) {
   try {
-    const id = await actorId();
+    const id = (await reallocationSession()).user.id;
     const projectId = z.string().min(1).max(128).parse(rawProjectId);
     return await prisma.$transaction(async tx => {
       const actor = await requireReallocationActor(tx, id);
@@ -66,7 +66,7 @@ export async function readTripReallocationProducts(rawProjectId: string) {
 
 export async function previewTripReallocation(rawInput: unknown) {
   try {
-    const id = await actorId();
+    const id = (await reallocationSession()).user.id;
     const input = reallocationInputSchema.parse(rawInput);
     return await prisma.$transaction(async tx => {
       const { noOp, split } = await prepareReallocation(tx, id, input);
@@ -77,9 +77,10 @@ export async function previewTripReallocation(rawInput: unknown) {
 
 export async function saveTripReallocation(rawInput: unknown) {
   try {
-    const id = await actorId();
+    const session = await reallocationSession();
+    const id = session.user.id;
     const input = reallocationInputSchema.parse(rawInput);
-    const result = await withMutationTransaction(tx => redistributeTripInTransaction(tx, id, input));
+    const result = await withMutationTransaction(tx => redistributeTripInTransaction(tx, id, input, false, financeSessionSource(session)));
     await deliverPostCommit("logistics-redistribute", result.postingId, [
       ...result.cachePaths.map(path => ({ kind: "cache" as const, run: () => revalidatePath(path) })),
       ...result.eventIds.map(eventId => ({ kind: "dispatch" as const, run: () => dispatchEvent(eventId) })),
