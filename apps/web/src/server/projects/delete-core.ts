@@ -1,4 +1,5 @@
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
+import { projectVisibilityCommand } from "./card-visibility-reversal";
 import {createHash} from 'node:crypto';
 import {Prisma} from '@prisma/client';
 import {MANAGER_ROLES,hasAnyRole} from '@/lib/roles';
@@ -22,13 +23,13 @@ export async function softDeleteProjectCore(tx:Prisma.TransactionClient,actor:Do
  const children=await tx.product.findMany({where:{projectId:project.id},orderBy:{id:'asc'}});
  if(projectProductsVersion(children)!==data.expectedProductsVersion)return failure('conflict','Изделия проекта изменились. Обновите подтверждение удаления');
  const deletedAt=new Date(),liveIds=children.filter(row=>row.deletedAt===null).map(row=>row.id);
- if((await tx.project.updateMany({where:{id:project.id,deletedAt:null,updatedAt:new Date(data.expectedUpdatedAt)},data:{deletedAt,deletedById:actor.id}})).count!==1)throw Error('PROJECT_SOFT_DELETE_CAS_RACE');
- if((await tx.product.updateMany({where:{projectId:project.id,deletedAt:null,id:{in:liveIds}},data:{deletedAt,deletedById:actor.id}})).count!==liveIds.length)throw Error('PROJECT_CHILD_DELETE_CAS_RACE');
+ if((await tx.project.updateMany({where:{id:project.id,deletedAt:null,updatedAt:new Date(data.expectedUpdatedAt)},data:{deletedAt,updatedAt:deletedAt,deletedById:actor.id}})).count!==1)throw Error('PROJECT_SOFT_DELETE_CAS_RACE');
+ if((await tx.product.updateMany({where:{projectId:project.id,deletedAt:null,id:{in:liveIds}},data:{deletedAt,updatedAt:deletedAt,deletedById:actor.id}})).count!==liveIds.length)throw Error('PROJECT_CHILD_DELETE_CAS_RACE');
  const result:ProjectDeleteResult={ok:true,projectId:project.id,number:project.number,title:project.title,deletedAt:deletedAt.toISOString(),clientMutationId:data.clientMutationId,affectedProductIds:liveIds};
- await writeChangeLogInTransaction(tx, {id:receiptId,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'project',entityId:project.id,action:'soft-delete',field:'deletedAt',oldValue:{number:project.number,title:project.title,updatedAt:data.expectedUpdatedAt,productsVersion:data.expectedProductsVersion},newValue:JSON.parse(JSON.stringify({fingerprint,result})) as Prisma.InputJsonValue},
+ await writeChangeLogInTransaction(tx, {id:receiptId,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'project',entityId:project.id,action:'soft-delete',field:'deletedAt',reversal:projectVisibilityCommand(true,deletedAt,liveIds),oldValue:{number:project.number,title:project.title,updatedAt:data.expectedUpdatedAt,productsVersion:data.expectedProductsVersion},newValue:JSON.parse(JSON.stringify({fingerprint,result})) as Prisma.InputJsonValue},
   {...projectJournalContext(project),before:businessSnapshot(project,PROJECT_JOURNAL_FIELDS),after:null});
  for(const product of children.filter(row=>row.deletedAt===null))await writeChangeLogInTransaction(tx,
-  {actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'product',entityId:product.id,action:'soft-delete',field:'deletedAt',
+  {operationRootId:receiptId,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'product',entityId:product.id,action:'soft-delete',field:'deletedAt',
    oldValue:businessSnapshot(product,PRODUCT_JOURNAL_FIELDS),newValue:{deletedAt:deletedAt.toISOString(),deletedById:actor.id,projectId:project.id}},
   {...productJournalContext(product),...automationJournalContext(actor,`Удаление проекта ${project.number}`),before:businessSnapshot(product,PRODUCT_JOURNAL_FIELDS),after:null});
  return result;

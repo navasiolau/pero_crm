@@ -1,4 +1,5 @@
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
+import { cardDependencies, productVisibilityCommand, readActiveNumbers } from "@/server/projects/card-visibility-reversal";
 import {parseProductPercentageRate} from "@/lib/product-percentage-rate-limit";
 import {liveProductWhere,liveProjectWhere} from "@/server/access/live-entities";
 import {softDeleteProductCore} from './delete-core';
@@ -6,7 +7,7 @@ import type {ProductDeleteInput,ProductDeleteMutationResult} from './delete-cont
 import { renumberActiveProductsInTransaction } from "./numbering";
 import { patchProductContactInTransaction } from "../projects/contact-core";
 import { titleReversalCommand } from './scalar-reversal';
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { MANAGER_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
@@ -118,7 +119,9 @@ export async function createProductInTransaction(tx: Prisma.TransactionClient, a
     try { assertProjectMoneyCurrency(project.currency); }
     catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Валюта проекта не подготовлена" }; }
   }
-  const numberChanges = numbering === "project" ? await renumberActiveProductsInTransaction(tx, actor, project) : [];
+  const createRoot = numbering === "project" ? randomUUID() : undefined;
+  const beforeNumbers = createRoot ? await readActiveNumbers(tx, project.id) : [];
+  const numberChanges = createRoot ? await renumberActiveProductsInTransaction(tx, actor, project, createRoot) : [];
   const suffixInt = await nextProductSuffixInt(project.id, tx);
   const number = `${project.number}.${suffixInt}`;
   const product = await tx.product.create({
@@ -153,6 +156,8 @@ export async function createProductInTransaction(tx: Prisma.TransactionClient, a
     entity: "product",
     entityId: product.id,
     action: "create",
+    ...(createRoot ? { id: createRoot, reversal: await productVisibilityCommand(tx, project.id, false, product.updatedAt,
+      beforeNumbers, numberChanges, await cardDependencies(tx, "product", product.id)) } : {}),
     newValue: { number, title: data.title, quantity: data.quantity, project: project.number,
       percentageDefaultsRevision: defaults.revision, percentageRates: defaults.rates,
       initialPrice: product.initialPrice?.toString() ?? null, initialPriceCaptureEligible: data.expectedPrice === undefined,

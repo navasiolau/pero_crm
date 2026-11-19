@@ -83,6 +83,13 @@ export function proposalFixture() {
         return clone(row);
       },
       findUnique: async ({ where }: { where: Filter }) => find(state.projects, where),
+      findUniqueOrThrow: async ({ where }: { where: Filter }) => {
+        const row = find(state.projects, where);
+        if (!row) throw Error("PROJECT_NOT_FOUND");
+        return { ...row, commercialProposal: state.proposals.find(item => item.projectId === row.id) ?? null,
+          _count: { products: state.products.filter(item => item.projectId === row.id).length,
+            stageHistory: state.stageHistory.filter(item => item.projectId === row.id).length } };
+      },
       update: async ({ where, data }: Write) => update(state.projects, where!, data),
     },
     product: {
@@ -93,6 +100,12 @@ export function proposalFixture() {
       },
       findMany: async ({ where }: { where: Filter }) => clone(state.products.filter(row => matches(row, where))),
       findUnique: async ({ where }: { where: Filter }) => find(state.products, where),
+      findUniqueOrThrow: async ({ where }: { where: Filter }) => {
+        const row = find(state.products, where);
+        if (!row) throw Error("PRODUCT_NOT_FOUND");
+        return { ...row, proposalItem: state.items.find(item => item.productId === row.id) ?? null,
+          _count: { statusHistory: state.statusHistory.filter(item => item.productId === row.id).length } };
+      },
       create: async ({ data }: Write) => {
         const row = { id: sequence("product"), deletedAt: null, deletedById: null, engineerId: null,
           expectedPrice: null, initialPrice: null, kind: null, description: null, technicalSpecifications: null, createdAt: new Date(0), updatedAt: new Date(0), ...defined(data) };

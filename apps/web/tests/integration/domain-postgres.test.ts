@@ -315,6 +315,11 @@ test("counterparties/native-create-revision-CAS-audit-rollback", async () => fix
   assert.equal(checks.realSqlRollback, true); assert.equal(checks.revisionCas, true);
 }));
 
+test("journal/project-and-product-visibility-with-stable-numbers", async () => fixture.rollback(async (tx, rows) => {
+  const { verifyCardVisibility } = await import("../helpers/native-card-visibility");
+  await verifyCardVisibility(tx, rows);
+}));
+
 test("journal/native-title-reversal-ABA-and-audit-atomicity", async () => fixture.rollback(async (tx, rows) => {
   const reversal = scope.load<typeof import("../../src/server/changelog/reversal-core")>("../src/server/changelog/reversal-core");
   const director = actorOf(await rows.user("undo-director", ["DIRECTOR"]));
