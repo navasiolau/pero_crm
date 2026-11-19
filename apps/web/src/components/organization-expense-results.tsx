@@ -1,4 +1,5 @@
 "use client";
+import { LogisticsReallocationButton } from "@/components/logistics/reallocation-dialog";
 
 import { useId, useState, type FormEvent } from "react";
 import { ExpenseProjectAssignmentDialog } from "@/components/expense-project-assignment-dialog";
@@ -99,8 +100,8 @@ function ExpenseFilterForm({ options, onReset }: Pick<OrganizationExpensePageDat
     </form>;
 }
 
-export function OrganizationExpenseResults({ options, page, pageSize, total, totalByn, sort, dir, canAssignProject, ...ledger }: OrganizationExpensePageData &
-  Pick<Parameters<typeof OrganizationPaymentsView>[0], "expenseArticles" | "stockMaterials" | "materialCreateOptions"> & { canAssignProject?: boolean }) {
+export function OrganizationExpenseResults({ options, page, pageSize, total, totalByn, sort, dir, canAssignProject, canRedistributeLogistics, ...ledger }: OrganizationExpensePageData &
+  Pick<Parameters<typeof OrganizationPaymentsView>[0], "expenseArticles" | "stockMaterials" | "materialCreateOptions"> & { canAssignProject?: boolean; canRedistributeLogistics?: boolean }) {
   const { set, pending } = useListParams();
   return <OrganizationPaymentsView direction="EXPENSE" {...ledger}
     renderDetailActions={(row, close) => <>
@@ -109,6 +110,7 @@ export function OrganizationExpenseResults({ options, page, pageSize, total, tot
           expectedHead={row.lastActionId} projects={ledger.projects.filter(project => project.currency === INTERNAL_CURRENCY || project.id === row.project?.id)} onApplied={close}/>
       ) : null}
       {ledger.stockMaterials ? <ExpenseReceiptDialog key={"receipt:" + row.id} payment={row} stockMaterials={ledger.stockMaterials} onApplied={close}/> : null}
+      {canRedistributeLogistics && row.logisticsTripId ? <LogisticsReallocationButton key={"logistics:" + row.id} paymentId={row.id} closeExpense={close}/> : null}
     </>}
     beforeTable={<>
       <ExpenseFilters options={options}/>

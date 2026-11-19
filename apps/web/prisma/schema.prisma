@@ -1053,6 +1053,9 @@ model LogisticsPosting {
   rateDate DateTime?
   paidAt DateTime
   manifestSnapshot Json
+  reallocatedFromId String? @unique
+  reallocatedFrom LogisticsPosting? @relation("LogisticsPostingReallocation", fields: [reallocatedFromId], references: [id], onDelete: Restrict)
+  reallocatedTo LogisticsPosting? @relation("LogisticsPostingReallocation")
   ttnNotRequired Boolean @default(false)
   createdAt DateTime @default(now())
   allocations LogisticsPostingAllocation[]
