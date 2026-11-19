@@ -7,6 +7,7 @@ import type { FileContentSource } from "@/server/files/document-storage";
 import { logisticsDocumentUploadSchema, type LogisticsDocumentView } from "./contracts";
 import { lockLogisticsTrip, requireLiveLogisticsTrip, requireLogisticsActor, type LogisticsTransaction } from "./core";
 import { logisticsJournalHints } from "./journal";
+import { logisticsDocumentUndoCommand } from "./lifecycle-contract";
 
 export type LogisticsDocumentStorage = {
   mode(): "local" | "s3";
@@ -64,6 +65,7 @@ export function createLogisticsDocumentService({ transaction, storage }: {
         return tx.logisticsDocument.create({ data: { id, ...data, size, contentHash, requestFingerprint,
           uploadedById: actorId, state: "PENDING", storageMode: storage.mode(), storageKey: `logistics-documents/${id}/${contentHash}` } });
       });
+      if (reserved.hiddenAt) throw new UploadError("LOGISTICS_DOCUMENT_CONFLICT", 409, "persist", "Загрузка отменена", "conflict");
       if (reserved.state === "READY") return { document: logisticsDocumentView(reserved), repeated: true };
       options.onPhase?.("storage-original");
       await storage.put(reserved, input.bytes);
@@ -76,10 +78,12 @@ export function createLogisticsDocumentService({ transaction, storage }: {
         const row = await tx.logisticsDocument.findUnique({ where: { id: reserved.id } });
         if (!row || row.requestFingerprint !== requestFingerprint)
           throw new UploadError("LOGISTICS_DOCUMENT_CONFLICT", 409, "persist", "Документ изменился — повторите загрузку", "conflict");
+        if (row.hiddenAt) throw new UploadError("LOGISTICS_DOCUMENT_CONFLICT", 409, "persist", "Загрузка отменена", "conflict");
         if (row.state === "READY") return { document: logisticsDocumentView(row), repeated: true };
         const ready = await tx.logisticsDocument.update({ where: { id: row.id }, data: { state: "READY", readyAt: new Date() } });
         await writeChangeLogInTransaction(tx, { id: `logistics-document:${row.id}`, actorType: "user", actorId,
           actorName: actor.name, entity: "logisticsDocument", entityId: row.id, action: "create",
+          reversal: logisticsDocumentUndoCommand({ documentId: row.id, tripId: row.tripId, expectedRevision: ready.visibilityRevision, hide: true }),
           newValue: { tripId: row.tripId, stage: row.stage, ttnNumber: row.ttnNumber, fileName: row.fileName,
             mimeType: row.mimeType, size: row.size, contentHash } }, { ...logisticsJournalHints(trip),
             entity: { label: `ТТН ${row.ttnNumber ?? row.fileName}` }, before: null,
@@ -93,7 +97,7 @@ export function createLogisticsDocumentService({ transaction, storage }: {
     async read(actorId: string, id: string) {
       const document = await transaction(async tx => {
         await requireLogisticsActor(actorId, tx, "documents");
-        return tx.logisticsDocument.findFirst({ where: { id, state: "READY", trip: { deletedAt: null } } });
+        return tx.logisticsDocument.findFirst({ where: { id, state: "READY", hiddenAt: null, trip: { deletedAt: null } } });
       });
       if (!document) return null;
       const body = await storage.open(document);
@@ -104,7 +108,7 @@ export function createLogisticsDocumentService({ transaction, storage }: {
       return transaction(async tx => {
         await requireLogisticsActor(actorId, tx, "documents");
         await requireTrip(tx, tripId);
-        return (await tx.logisticsDocument.findMany({ where: { tripId, state: "READY" },
+        return (await tx.logisticsDocument.findMany({ where: { tripId, state: "READY", hiddenAt: null },
           orderBy: [{ createdAt: "asc" }, { id: "asc" }] })).map(logisticsDocumentView);
       });
     },

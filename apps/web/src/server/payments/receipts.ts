@@ -40,9 +40,9 @@ export async function readPaymentReceipt(actor: DomainActor, data: ReceiptInput,
   return payment;
 }
 
-export async function recordPaymentReceipt(actor: DomainActor, data: ReceiptInput, paymentId: string, tx: Prisma.TransactionClient) {
+export async function recordPaymentReceipt(actor: DomainActor, data: ReceiptInput, paymentId: string, tx: Prisma.TransactionClient, operationRootId?: string) {
   if (!data.clientMutationId) return;
   await writeChangeLogInTransaction(tx, { id: paymentReceiptId(data.clientMutationId), actorType: "user", actorId: actor.id,
-    actorName: actor.name || undefined, source: actor.source, entity: "payment", entityId: paymentId, action: "request",
+    actorName: actor.name || undefined, source: actor.source, entity: "payment", entityId: paymentId, action: "request", operationRootId,
     newValue: { ...(data.reportDocumentIds !== undefined ? { version: 2 } : {}), fingerprint: paymentFingerprint(actor.id, data) } }, { kind: "receipt" });
 }

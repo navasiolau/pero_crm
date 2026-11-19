@@ -30,6 +30,7 @@ import { warehouseCatalogReversal } from "@/server/warehouse/catalog-reversal";
 import { officeDirectoryReversal } from "./office-directory-reversal";
 import { signatureSettingsReversal } from "@/server/kp/signature-settings";
 import { warehouseMovementReversal } from "@/server/warehouse/movement-reversal";
+import { logisticsTripLifecycleReversal, logisticsDocumentVisibilityReversal } from "@/server/logistics/lifecycle-reversal";
 
 export const journalReversals = [
   ...productFieldReversals,
@@ -66,4 +67,6 @@ export const journalReversals = [
   productTitleReversal,
   signatureSettingsReversal,
   warehouseMovementReversal,
+  logisticsTripLifecycleReversal,
+  logisticsDocumentVisibilityReversal,
 ];

@@ -10,7 +10,7 @@ export async function assertLogisticsPaymentContext(actor: DomainActor, data: Pa
   await requireLogisticsActor(actor.id, tx);
   const allocation = await tx.logisticsPostingAllocation.findUnique({ where: { id: allocationId }, include: {
     payment: { select: { id: true } },
-    posting: { include: { trip: { select: { deletedAt: true } }, documents: { include: { document: { select: { tripId: true, state: true, stage: true } } } } } },
+    posting: { include: { trip: { select: { deletedAt: true } }, documents: { include: { document: { select: { tripId: true, state: true, stage: true, hiddenAt: true } } } } } },
   } });
   const posting = allocation?.posting;
   if (!allocation || !posting || posting.trip.deletedAt || posting.status !== "ACTIVE" || posting.actorId !== actor.id || allocation.payment ||
@@ -21,7 +21,7 @@ export async function assertLogisticsPaymentContext(actor: DomainActor, data: Pa
       posting.expenseArticleId !== prepared.articleId || !posting.rate.eq(prepared.rate) ||
       posting.rateDate?.getTime() !== prepared.rateDate?.getTime() || posting.paidAt.getTime() !== prepared.paidAt.getTime() ||
       (!posting.ttnNotRequired && !posting.documents.length) || posting.documents.some(row => row.document.tripId !== posting.tripId ||
-        row.document.state !== "READY" || !["ISSUED", "SIGNED"].includes(row.document.stage)))
+        row.document.state !== "READY" || row.document.hiddenAt || !["ISSUED", "SIGNED"].includes(row.document.stage)))
     throw Error("Нет подтверждённой доли рейса с сохранённой ТТН для расхода");
   return allocation.id;
 }

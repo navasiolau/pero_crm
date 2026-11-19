@@ -6,9 +6,9 @@ import { requireLogisticsActor, type LogisticsTransaction } from "./core";
 import { logisticsDocumentView } from "./documents";
 
 export const logisticsTripReadInclude = {
-  shares: { include: { project: { select: { id: true, number: true, title: true } } }, orderBy: { projectId: "asc" } },
-  lines: { orderBy: { id: "asc" } },
-  documents: { where: { state: "READY" }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
+  shares: { where: { removedAt: null }, include: { project: { select: { id: true, number: true, title: true } } }, orderBy: { projectId: "asc" } },
+  lines: { where: { removedAt: null }, orderBy: { id: "asc" } },
+  documents: { where: { state: "READY", hiddenAt: null }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
 } satisfies Prisma.LogisticsTripInclude;
 type TripReadRecord = Prisma.LogisticsTripGetPayload<{ include: typeof logisticsTripReadInclude }>;
 export function logisticsTripView(row: TripReadRecord): LogisticsTripView {
@@ -21,8 +21,8 @@ export function logisticsTripView(row: TripReadRecord): LogisticsTripView {
     documents: row.documents.map(logisticsDocumentView) };
 }
 const documentsSelect = { id: true, date: true, deletedAt: true, ttnNotRequired: true,
-  shares: { select: { project: { select: { id: true, number: true } } }, orderBy: { projectId: "asc" } },
-  documents: { where: { state: "READY" }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
+  shares: { where: { removedAt: null }, select: { project: { select: { id: true, number: true } } }, orderBy: { projectId: "asc" } },
+  documents: { where: { state: "READY", hiddenAt: null }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
 } satisfies Prisma.LogisticsTripSelect;
 type DocumentsReadRecord = Prisma.LogisticsTripGetPayload<{ select: typeof documentsSelect }>;
 function documentsView(row: DocumentsReadRecord): LogisticsTripDocumentsView {
@@ -49,18 +49,18 @@ export async function listLogisticsTripsCore(actorId: string | null | undefined,
     const query = logisticsTripListSchema.parse(input ?? {}), manage = !documentsOnly && canManageLogistics(actor.roles);
     const search: Prisma.LogisticsTripWhereInput[] = [
       { id: { contains: query.query, mode: "insensitive" } },
-      { shares: { some: { project: { number: { contains: query.query, mode: "insensitive" } } } } },
-      { documents: { some: { state: "READY", OR: [
+      { shares: { some: { removedAt: null, project: { number: { contains: query.query, mode: "insensitive" } } } } },
+      { documents: { some: { state: "READY", hiddenAt: null, OR: [
         { ttnNumber: { contains: query.query, mode: "insensitive" } }, { fileName: { contains: query.query, mode: "insensitive" } },
       ] } } },
     ];
     if (manage) search.push({ comment: { contains: query.query, mode: "insensitive" } },
-      { lines: { some: { nameSnapshot: { contains: query.query, mode: "insensitive" } } } },
-      { shares: { some: { project: { title: { contains: query.query, mode: "insensitive" } } } } });
+      { lines: { some: { removedAt: null, nameSnapshot: { contains: query.query, mode: "insensitive" } } } },
+      { shares: { some: { removedAt: null, project: { title: { contains: query.query, mode: "insensitive" } } } } });
     const where: Prisma.LogisticsTripWhereInput = {
       deletedAt: null,
       ...(query.query ? { OR: search } : {}),
-      ...(query.projectId ? { shares: { some: { projectId: query.projectId } } } : {}),
+      ...(query.projectId ? { shares: { some: { removedAt: null, projectId: query.projectId } } } : {}),
       ...((query.dateFrom || query.dateTo) ? { date: {
         ...(query.dateFrom ? { gte: new Date(`${query.dateFrom}T00:00:00.000Z`) } : {}),
         ...(query.dateTo ? { lte: new Date(`${query.dateTo}T00:00:00.000Z`) } : {}),

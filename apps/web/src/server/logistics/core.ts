@@ -8,6 +8,7 @@ import { logisticsTripCreateSchema, logisticsTripUpdateSchema, shipmentLineKey,
   type LogisticsTripManifestInput, type LogisticsTripMutationResult } from "./contracts";
 import { logisticsTripWritePolicy } from "./policy";
 import { logisticsJournalHints } from "./journal";
+import { logisticsTripUndoCommand, manifestSnapshot } from "./lifecycle-contract";
 
 export type LogisticsTransaction = <T>(operation: (tx: Prisma.TransactionClient) => Promise<T>) => Promise<T>;
 
@@ -28,8 +29,8 @@ export async function lockLogisticsMutation(tx: Prisma.TransactionClient, client
 }
 export async function requireLiveLogisticsTrip(tx: Prisma.TransactionClient, tripId: string) {
   const trip = await tx.logisticsTrip.findUnique({ where: { id: tripId }, select: { id: true, deletedAt: true, date: true,
-    shares: { select: { projectId: true, project: { select: { number: true } } } },
-    lines: { select: { productId: true, materialId: true, numberSnapshot: true, nameSnapshot: true } } } });
+    shares: { where: { removedAt: null }, select: { projectId: true, project: { select: { number: true } } } },
+    lines: { where: { removedAt: null }, select: { productId: true, materialId: true, numberSnapshot: true, nameSnapshot: true } } } });
   if (!trip || trip.deletedAt) throw new UploadError("LOGISTICS_TRIP_NOT_FOUND", 404, "context", "Рейс не найден");
   return trip;
 }
@@ -39,7 +40,7 @@ function invalid(message: string): never {
 function conflict(message = "Рейс уже изменён. Откройте актуальную запись"): never {
   throw new UploadError("LOGISTICS_REVISION_CONFLICT", 409, "persist", message, "conflict");
 }
-export const logisticsManifestInclude = { shares: { include: { project: { select: { number: true } } } }, lines: true } satisfies Prisma.LogisticsTripInclude;
+export const logisticsManifestInclude = { shares: { where: { removedAt: null }, include: { project: { select: { number: true } } } }, lines: { where: { removedAt: null } } } satisfies Prisma.LogisticsTripInclude;
 export type LogisticsManifestRecord = Prisma.LogisticsTripGetPayload<{ include: typeof logisticsManifestInclude }>;
 export type PreparedLogisticsManifest = LogisticsTripManifestInput & {
   ttnNotRequired: boolean;
@@ -81,23 +82,36 @@ export async function validateTripManifest(tx: Prisma.TransactionClient, data: L
 /** Вызывается №124 только внутри его серверной денежной транзакции и блокировки. */
 export async function replaceTripManifestInTransaction(tx: Prisma.TransactionClient, tripId: string,
   data: PreparedLogisticsManifest, previous?: LogisticsManifestRecord) {
-  await tx.logisticsShipmentLine.deleteMany({ where: { tripId } });
-  await tx.logisticsProjectShare.deleteMany({ where: { tripId, projectId: { notIn: data.shares.map(share => share.projectId) } } });
-  for (const share of data.shares) await tx.logisticsProjectShare.upsert({
-    where: { tripId_projectId: { tripId, projectId: share.projectId } },
-    create: { id: randomUUID(), tripId, ...share }, update: { percentBps: share.percentBps },
+  const wantedLines = new Set(data.snapshots.map(shipmentLineKey));
+  const wantedShares = new Set(data.shares.map(share => share.projectId));
+  const removedAt = new Date();
+  const removedLines = previous?.lines.filter(line => !wantedLines.has(shipmentLineKey(line))) ?? [];
+  const removedShares = previous?.shares.filter(share => !wantedShares.has(share.projectId)) ?? [];
+  if (removedLines.length) await tx.logisticsShipmentLine.updateMany({
+    where: { tripId, id: { in: removedLines.map(line => line.id) }, removedAt: null }, data: { removedAt },
   });
-  await tx.logisticsShipmentLine.createMany({ data: data.snapshots.map(line => ({
-    id: previous?.lines.find(row => shipmentLineKey(row) === shipmentLineKey(line))?.id ?? randomUUID(), tripId, ...line,
-  })) });
-}
-
-function snapshot(row: LogisticsManifestRecord) {
-  return { date: row.date.toISOString().slice(0, 10), comment: row.comment, revision: row.revision, ttnNotRequired: row.ttnNotRequired,
-    shares: row.shares.map(share => ({ projectId: share.projectId, percentBps: share.percentBps })),
-    lines: row.lines.map(line => ({ projectId: line.projectId, kind: line.kind, productId: line.productId,
-      materialId: line.materialId, nameSnapshot: line.nameSnapshot, numberSnapshot: line.numberSnapshot,
-      unitSnapshot: line.unitSnapshot, quantity: line.quantity.toNumber() })) };
+  if (removedShares.length) await tx.logisticsProjectShare.updateMany({
+    where: { tripId, id: { in: removedShares.map(share => share.id) }, removedAt: null }, data: { removedAt },
+  });
+  for (const share of data.shares) {
+    const kept = previous?.shares.find(row => row.projectId === share.projectId);
+    if (kept?.percentBps === share.percentBps) continue;
+    await tx.logisticsProjectShare.upsert({
+      where: { tripId_projectId: { tripId, projectId: share.projectId } },
+      create: { id: randomUUID(), tripId, ...share }, update: { percentBps: share.percentBps, removedAt: null },
+    });
+  }
+  for (const line of data.snapshots) {
+    const kept = previous?.lines.find(row => shipmentLineKey(row) === shipmentLineKey(line));
+    if (kept && kept.quantity.eq(line.quantity) && kept.nameSnapshot === line.nameSnapshot &&
+        kept.numberSnapshot === line.numberSnapshot && kept.unitSnapshot === line.unitSnapshot) continue;
+    const { projectId, productId, materialId } = line;
+    await tx.logisticsShipmentLine.upsert({
+      where: productId ? { tripId_projectId_productId: { tripId, projectId, productId } }
+        : { tripId_projectId_materialId: { tripId, projectId, materialId: materialId! } },
+      create: { id: randomUUID(), tripId, ...line }, update: { ...line, removedAt: null },
+    });
+  }
 }
 
 function tripMutationFingerprint(actorId: string | null | undefined, operation: "create" | "update",
@@ -123,7 +137,11 @@ async function auditMutation(tx: Prisma.TransactionClient, actor: { id: string; 
     requestFingerprint: fingerprint, operation, revision: row.revision } });
   await writeChangeLogInTransaction(tx, { id: `logistics-mutation:${clientMutationId}`, actorType: "user", actorId: actor.id,
     actorName: actor.name, entity: "logisticsTrip", entityId: row.id, action: operation,
-    ...(previous ? { oldValue: snapshot(previous) } : {}), newValue: snapshot(row) }, logisticsJournalHints(row, previous));
+    ...(previous ? { oldValue: { ...manifestSnapshot(previous), revision: previous.revision } } : {}),
+    newValue: { ...manifestSnapshot(row), revision: row.revision },
+    reversal: logisticsTripUndoCommand({ tripId: row.id, expectedRevision: row.revision, expectedHidden: false,
+      expectedPostingId: null, restoreHidden: !previous, restorePostingId: null, manifest: previous ? manifestSnapshot(previous) : null,
+      requireNoDocuments: !previous }) }, logisticsJournalHints(row, previous));
   await tx.domainEvent.create({ data: { type: `logistics.trip.${operation === "create" ? "created" : "updated"}`, actor: actor.id,
     payload: { tripId: row.id, revision: row.revision, projectIds: row.shares.map(share => share.projectId) } } });
 }

@@ -3,11 +3,12 @@ import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { canDeleteLogisticsTrip } from "@/lib/logistics-access";
 import { UploadError } from "@/server/files/upload-result";
-import { lockLogisticsMutation, lockLogisticsTrip, requireLogisticsActor, type LogisticsTransaction } from "./core";
+import { lockLogisticsMutation, lockLogisticsTrip, requireLogisticsActor, logisticsManifestInclude, type LogisticsTransaction } from "./core";
 import { logisticsTripDeleteSchema, type LogisticsTripDeleteResult } from "./delete-contracts";
 import { logisticsJournalHints } from "./journal";
+import { logisticsTripUndoCommand } from "./lifecycle-contract";
 
-const deletionInclude = { shares: { include: { project: { select: { number: true } } } }, lines: true, documents: { select: { id: true, fileName: true, stage: true, ttnNumber: true } }, postings: { include: { allocations: true } } } satisfies Prisma.LogisticsTripInclude;
+const deletionInclude = { ...logisticsManifestInclude, documents: { where: { hiddenAt: null, state: "READY" }, select: { id: true, fileName: true, stage: true, ttnNumber: true } }, postings: { include: { allocations: true } } } satisfies Prisma.LogisticsTripInclude;
 type DeletionTrip = Prisma.LogisticsTripGetPayload<{ include: typeof deletionInclude }>;
 const projectIds = (trip: DeletionTrip) => [...new Set([...trip.shares.map(row => row.projectId),
   ...trip.postings.flatMap(posting => posting.allocations.map(row => row.projectId))])];
@@ -59,7 +60,10 @@ export async function deleteLogisticsTripCore(actorId: string | null | undefined
         lineIds: trip.lines.map(row => row.id), documentIds: trip.documents.map(row => row.id),
         postingId: current?.id ?? null, amount: current?.amount.toFixed(2) ?? null, currency: current?.currency ?? null,
         bynAmount: current?.bynAmount.toFixed(2) ?? null, cashAccountId: current?.cashAccountId ?? null },
-      newValue: { deletedAt: deletedAt.toISOString(), deletedById: actor.id, revision } }, { ...logisticsJournalHints(trip),
+      newValue: { deletedAt: deletedAt.toISOString(), deletedById: actor.id, revision },
+      reversal: logisticsTripUndoCommand({ tripId: trip.id, expectedRevision: revision, expectedHidden: true,
+        expectedPostingId: current?.id ?? null, restoreHidden: false, restorePostingId: current?.id ?? null,
+        manifest: null, requireNoDocuments: false }) }, { ...logisticsJournalHints(trip),
         before: { date: trip.date.toISOString().slice(0, 10), comment: trip.comment, revision: trip.revision, ttnNotRequired: trip.ttnNotRequired,
           shares: trip.shares.map(share => ({ projectId: share.projectId, percentBps: share.percentBps })),
           lines: trip.lines.map(line => ({ projectId: line.projectId, productId: line.productId, materialId: line.materialId,

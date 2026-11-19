@@ -1968,3 +1968,8 @@ test("materials/frozen-501-costs-batch-scalar-positional-ACL-1-5-20-real-SQL-bud
   assert.equal((await warehouse.getProjectMaterialsBatch([ids[0]], c.users.admin, tx))[0].materialsTotalByn, 501);
   await tx.stockMovement.update({ where: { id: rows.id("expense-001") }, data: { unitPrice: null, totalByn: null } });
 }));
+
+test("logistics/native retained manifest, TТН and grouped ledger reversal", async () => fixture.rollback(async tx => {
+  const { verifyLogisticsLifecycleNative } = await import("../helpers/logistics-lifecycle-native");
+  await verifyLogisticsLifecycleNative(tx);
+}));

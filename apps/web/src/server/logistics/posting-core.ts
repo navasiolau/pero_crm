@@ -1,5 +1,6 @@
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { logisticsJournalHints } from "./journal";
+import { logisticsTripUndoCommand, manifestSnapshot } from "./lifecycle-contract";
 import { createHash, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { assertProjectMoneyCurrency } from "@/lib/internal-currency";
@@ -89,7 +90,7 @@ export async function postLogisticsInTransaction(actorId: string, input: Logisti
     tx.project.findMany({ where: { id: { in: manifest.shares.map(share => share.projectId) }, deletedAt: null },
       select: { id: true, number: true, currency: true } }),
     tx.cashAccount.findUnique({ where: { id: data.cashAccountId }, select: { id: true, name: true, currency: true, active: true } }),
-    tx.logisticsDocument.findMany({ where: { id: { in: data.documentIds }, tripId: data.tripId, state: "READY", stage: { in: ["ISSUED", "SIGNED"] } },
+    tx.logisticsDocument.findMany({ where: { id: { in: data.documentIds }, tripId: data.tripId, state: "READY", hiddenAt: null, stage: { in: ["ISSUED", "SIGNED"] } },
       select: { id: true, contentHash: true, stage: true, ttnNumber: true, fileName: true } }),
   ]);
   if (projects.length !== manifest.shares.length) failure("Один из проектов не найден или находится в корзине");
@@ -128,6 +129,7 @@ export async function postLogisticsInTransaction(actorId: string, input: Logisti
     rate: split.rate, rateDate: prepared.rateDate, paidAt: prepared.paidAt, manifestSnapshot: snapshot, ttnNotRequired: manifest.ttnNotRequired,
   } });
   await tx.logisticsPostingDocument.createMany({ data: documents.map(document => ({ postingId, tripId: previous.id, documentId: document.id })) });
+  const operationRootId = `logistics-posting:${data.clientMutationId}`;
   for (const allocation of split.allocations) {
     const project = projects.find(row => row.id === allocation.projectId)!;
     const saved = await tx.logisticsPostingAllocation.create({ data: { id: randomUUID(), postingId, ...allocation, projectNumberSnapshot: project.number } });
@@ -135,13 +137,16 @@ export async function postLogisticsInTransaction(actorId: string, input: Logisti
     const partPrepared = { ...prepared, account, project, amount: saved.amount.toNumber(), bynAmount: saved.bynAmount.toNumber() };
     await createPaymentInTransaction({ ...actor, source: "web" }, { direction: "EXPENSE", projectId: project.id,
       amount: partPrepared.amount, currency: data.currency, cashAccountId: account.id,
-      comment: manifest.comment || `Логистика · ${manifest.date}` }, partPrepared, tx, { logisticsAllocationId: saved.id });
+      comment: manifest.comment || `Логистика · ${manifest.date}` }, partPrepared, tx, { logisticsAllocationId: saved.id, operationRootId });
   }
   const event = await tx.domainEvent.create({ data: { type: current ? "logistics.trip.corrected" : "logistics.trip.posted", actor: actor.id,
     payload: { tripId: previous.id, postingId, previousPostingId: current?.id ?? null, revision, amount: split.amount,
       currency: data.currency, bynAmount: split.bynAmount, projectIds: projects.map(project => project.id) } } });
-  await writeChangeLogInTransaction(tx, { id: `logistics-posting:${data.clientMutationId}`, actorType: "user", actorId: actor.id,
+  await writeChangeLogInTransaction(tx, { id: operationRootId, actorType: "user", actorId: actor.id,
     actorName: actor.name, entity: "logisticsPosting", entityId: postingId, action: mode,
+    reversal: logisticsTripUndoCommand({ tripId: previous.id, expectedRevision: revision, expectedHidden: false,
+      expectedPostingId: postingId, restoreHidden: false, restorePostingId: current?.id ?? null,
+      manifest: replacement ? manifestSnapshot(previous) : null, requireNoDocuments: false }),
     ...(current ? { oldValue: { postingId: current.id, amount: current.amount.toFixed(2), currency: current.currency,
       cashAccountId: current.cashAccountId, bynAmount: current.bynAmount.toFixed(2) } } : {}),
     newValue: { tripId: previous.id, revision, amount: split.amount, currency: data.currency, bynAmount: split.bynAmount,
