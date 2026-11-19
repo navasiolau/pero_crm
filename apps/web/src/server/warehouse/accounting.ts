@@ -12,6 +12,7 @@ import { addPosition, addPaidPosition, addValue, issuePosition, returnShare, ave
 import {warehouseMetadataGate} from './gate';
 import {activeStockMovementWhere} from './active-records';
 import {journalProductContext} from '@/server/finance/journal';
+import { expenseIssueProductWhere, requireExpenseIssueRole } from './expense-issue-access';
 
 type Tx=Prisma.TransactionClient;
 type Reader=Pick<PrismaClient,'warehouseAccountingState'|'warehouseBalance'|'stockMovement'>;
@@ -43,9 +44,11 @@ export type WarehouseMovementInput={kind:'INCOME'|'EXPENSE'|'RETURN';clientMutat
 export async function warehouseMove(tx:Tx,actor:WarehouseActor,input:WarehouseMovementInput,paidReceipt?:{bynAmount:string;operationRootId?:string;purchase?:{
  currency:string;unitPrice:string;amount:string;cashAccountId:string;cashAccount:string;expenseArticleId:string|null;
  rate:string;rateDate:string|null;paidAt:string;reportDocumentIds:readonly string[];
-}}){
+}},expenseIssue?:{operationRootId?:string;projectId:string}){
+ if(expenseIssue&&(paidReceipt||input.kind!=='EXPENSE'||!input.productId||input.projectMaterialId))throw Error('Некорректный контекст выдачи по чеку');
  if(paidReceipt&&input.kind!=='INCOME')throw Error('Оплата допустима только для прихода');
- if(!hasAnyRole(actor.roles,paidReceipt?FINANCE_ROLES:WAREHOUSE_MANAGE_ROLES))throw Error('Недостаточно прав');
+ if(expenseIssue)requireExpenseIssueRole(actor);
+ else if(!hasAnyRole(actor.roles,paidReceipt?FINANCE_ROLES:WAREHOUSE_MANAGE_ROLES))throw Error('Недостаточно прав');
  if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(input.clientMutationId))throw Error('Некорректный идентификатор запроса');
  if(input.projectMaterialId&&input.productId)throw Error('Выберите изделие либо строку потребности');
  const clientMutationId=input.clientMutationId.toLowerCase(),quantity=quantityInput(input.quantity);
@@ -75,7 +78,7 @@ export async function warehouseMove(tx:Tx,actor:WarehouseActor,input:WarehouseMo
  if(input.kind!=='INCOME'&&!productId)throw Error('Выберите изделие');
  await tx.$queryRaw`SELECT id FROM "Material" WHERE id=${materialId} FOR UPDATE`;
  if(productId)await lockProductRow(tx,productId);
- const product=productId?await tx.product.findUnique({where:{id:productId,AND:[productVisibilityWhere(actor)]},select:{id:true,number:true,projectId:true}}):null;
+ const product=productId?await tx.product.findUnique({where:{id:productId,AND:[expenseIssue?expenseIssueProductWhere(actor,expenseIssue.projectId):productVisibilityWhere(actor)]},select:{id:true,number:true,projectId:true}}):null;
  if(productId&&!product)throw Error('Изделие не найдено');
  const material=await tx.material.findUnique({where:{id:materialId}});
  if(!material||(input.kind==='INCOME'&&!material.active))throw Error('Материал не найден');
@@ -109,7 +112,7 @@ export async function warehouseMove(tx:Tx,actor:WarehouseActor,input:WarehouseMo
  await tx.$executeRaw`UPDATE "Material" SET "purchasePrice"=CAST(${averagePrice(result.position)} AS numeric) WHERE id=${materialId}`;
  if(line)await tx.projectMaterial.update({where:{id:line.id},data:{issuedQty:input.kind==='EXPENSE'?{increment:quantity}:{decrement:quantity}}});
  const eventId='warehouse94-'+clientMutationId;
- await writeChangeLogInTransaction(tx, {id:eventId,operationRootId:paidReceipt?.operationRootId,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,source:actor.source,entity:'stockMovement',entityId:movement.id,action:'create',newValue:{type:input.kind,receiptKind:movement.receiptKind,material:material.name,quantity,unitPrice:movement.unitPrice?.toString()??null}},
+ await writeChangeLogInTransaction(tx, {id:eventId,operationRootId:paidReceipt?.operationRootId??expenseIssue?.operationRootId,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,source:actor.source,entity:'stockMovement',entityId:movement.id,action:'create',newValue:{type:input.kind,receiptKind:movement.receiptKind,material:material.name,quantity,unitPrice:movement.unitPrice?.toString()??null}},
   {entity:{label:`${input.kind==='INCOME'?'Приход':input.kind==='EXPENSE'?'Выдача':'Возврат'} материала ${material.name}`},contexts:product?[journalProductContext(product)]:[],
    links:[{type:'material',id:material.id,label:material.name},...(product?[{type:'product',...journalProductContext(product)}]:[]),
     ...(paidReceipt?.purchase?[{type:'cashAccount',id:paidReceipt.purchase.cashAccountId,label:paidReceipt.purchase.cashAccount}]:[])],

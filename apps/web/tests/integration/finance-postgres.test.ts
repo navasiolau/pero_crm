@@ -458,6 +458,11 @@ test("payment/project-assignment-preserves-money-and-restores-lineage", async ()
   await verifyExpenseProjectAssignmentNative(tx, rows);
 }));
 
+test("warehouse/expense-receipt-partial-issue-current-valuation-and-reversal", async () => fixture.rollback(async (tx, rows) => {
+  const { verifyNativeExpenseReceiptIssue } = await import("../helpers/native-expense-receipt-issue");
+  await verifyNativeExpenseReceiptIssue(tx, rows);
+}));
+
 test("payment/scenario-minimal-effects-replay-skips-fx", async () => fixture.rollback(async (tx, rows) => {
   const c = await cashContext(tx, rows), input: PaymentInput = { direction: "INCOME", cashAccountId: c.account.id, amount: 100, currency: "BYN", comment: "own", clientMutationId: randomUUID() };
   let prepared = 0;

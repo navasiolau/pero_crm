@@ -21,6 +21,7 @@ const rows = Array.from({ length: 101 }, (_, index) => ({
   id: "payment-real-id-" + String(index + 1), direction: "EXPENSE", paidAt: "2026-11-20T10:00:00.000Z",
   amount: 10, bynAmount: 10, rate: 1, rateDate: null, currency: "BYN", project: index === 1 ? { id: "source", number: "402", title: "Проект чека", archived: false } : null,
   canPostExpenseReceipt: index === 1, reportDocuments: [], lastActionId: "fixture-head", hasActiveExpenseReceipt: index === 3,
+  receiptLines: index === 3 ? [{ movementId:"source-line", materialId:"oak", materialName:"Дуб", quantity:"10", unit:"шт.", amount:"10.00", unitPrice:"1", stockValueByn:"10.00" }] : [],
   cashAccountName: ["Касса А", "Касса Б", "Касса В"][index % 3], expenseArticleName: index % 2 ? "Материалы" : "Прочее",
   comment: "fixture", cash: ["a", "b", "c"][index % 3], article: index % 2 ? "materials" : "other",
 }));
@@ -57,6 +58,17 @@ const boundaries = {
   "@/components/payment-dialog": "export function PaymentDialog() { return null; }",
   "@/components/report-document-button": "export function ReportDocumentButton() { return null; }",
   "@/server/payments/project-assignment-actions": 'export async function assignOrdinaryExpenseProject(input) { window.__fixtureAssignment = input; return { ok:true, changed:true }; }',
+  "@/server/warehouse/expense-issue-actions": `
+    const source={movementId:"source-line",materialId:"oak",materialName:"Дуб",unit:"шт.",receiptQuantity:"10.000",issuedQuantity:"2.000",remainingQuantity:"8.000"};
+    export async function getExpenseIssueChoices(input) {
+      return {ok:true,sources:[source],choices: input.projectId ? [{id:"product",label:"124.1 · Шкаф"}] : [{id:"project-124",label:"124 · Действующий проект"}]};
+    }
+    export async function previewExpenseIssue(input) {
+      window.expenseIssuePreview=input;
+      return {ok:true,fingerprint:"confirmed-issue",totalByn:"12.50",lines:[{...source,quantity:"2.500",moneyByn:"12.50",warehouseBefore:"7.000",warehouseAfter:"4.500"}]};
+    }
+    export async function applyExpenseIssue(input) {window.expenseIssueApplied=input;return {ok:true,issueId:"issue"};}
+  `,
   "@/server/warehouse/expense-receipt-actions": 'export async function previewExpenseReceipt(input) { window.previewInput = input; return { ok:true, fingerprint:"confirmed", actorId:"cashier", projectNumber:"402", lines:input.lines.map((row,index) => ({...row, materialName:index ? "МДФ" : "Дуб", unit:index ? "м²" : "шт.", bynAmount:row.amount})) }; } export async function applyExpenseReceipt(input,actor) { window.appliedReceipt = {input,actor}; return {ok:true,receiptId:"receipt"}; }',
   "@/server/payments/actions": 'export async function deletePayment() { throw Error("UNEXPECTED_DELETE"); }',
   "@/server/list-preferences-actions": 'export async function saveListPreference(section, query) { const value = JSON.stringify({version:2, engineerFilterInitialized:true, query}); localStorage.setItem("expense-fixture", value); return { ok:true, value }; }',
@@ -163,6 +175,24 @@ test("реестр расходов в Chromium сохраняет фильтр�
     await page.getByText("ID payment-real-id-4", { exact: true }).click();
     await expect(page.getByRole("dialog").getByText("payment-real-id-4", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Назначить на проект", exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Выдать на изделие", exact: true }).click();
+    const issue = page.getByRole("dialog", { name: "Выдать материалы по чеку" });
+    await expect(issue.getByText(/выдано 2 · доступно по чеку 8/)).toBeVisible();
+    await issue.getByLabel("Проект", { exact: true }).click();
+    await page.getByRole("button", { name: "124 · Действующий проект", exact: true }).click();
+    await issue.getByLabel("Изделие проекта", { exact: true }).click();
+    await page.getByRole("button", { name: "124.1 · Шкаф", exact: true }).click();
+    await issue.getByLabel("Количество · Дуб", { exact: true }).fill("2,5");
+    await issue.getByRole("button", { name: "Рассчитать выдачу", exact: true }).click();
+    await expect(issue.getByText(/остаток склада 7 → 4,5/)).toBeVisible();
+    await issue.getByRole("button", { name: "Подтвердить выдачу", exact: true }).click();
+    await expect(issue).toHaveCount(0);
+    const issued = await page.evaluate(() => window.expenseIssueApplied);
+    assert.equal(issued.paymentId, "payment-real-id-4");
+    assert.equal(issued.projectId, "project-124");
+    assert.equal(issued.productId, "product");
+    assert.deepEqual(issued.lines, [{ sourceMovementId: "source-line", quantity: "2,5" }]);
+    assert.equal(issued.fingerprint, "confirmed-issue");
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();
