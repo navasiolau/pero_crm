@@ -11,6 +11,7 @@ type AuditRow = Record<string, unknown>;
 type Presentation = {
   entity: { label: string };
   contexts: { kind: string; id: string }[];
+  links: { type: string; id: string }[];
   changes: { path: string; before: unknown; after: unknown }[];
 };
 const actor = { id: "audit-manager", name: "Менеджер", roles: ["ADMIN"] as Role[], source: "web" as const };
@@ -22,16 +23,39 @@ const presentation = (row: AuditRow) => {
 test("создание материала сохраняет комментарий и все настройки, не меняя прежний raw audit", async () => {
   const rows: AuditRow[] = [];
   const comment = "Полное описание материала ".repeat(40);
+  const queries: { sql: string; values: unknown[] }[] = [];
   const tx = {
+    $queryRaw: async (sql: TemplateStringsArray, ...values: unknown[]) => {
+      const statement = sql.join("?");
+      queries.push({ sql: statement, values });
+      if (statement.includes('FROM "StockMovement"')) return [{ count: 0 }];
+      return [{ id: values[0] }];
+    },
     materialUnit: { findUnique: async () => ({ id: "unit", name: "м²" }) },
     materialCategory: { findUnique: async () => ({ id: "category", name: "Плиты", active: true }) },
-    material: { create: async ({ data }: { data: Record<string, unknown> }) => ({ id: "material", ...data, measurementUnit: { name: "м²" } }) },
+    material: { create: async ({ data }: { data: Record<string, unknown> }) => ({
+      id: "material", active: true, warehouseCatalogRevision: 0, ...data, measurementUnit: { name: "м²" },
+    }) },
     changeLog: { create: async ({ data }: { data: AuditRow }) => { rows.push(data); return data; } },
   } as unknown as Prisma.TransactionClient;
   const result = await createMaterialInTransaction(actor, { name: "ЛДСП", sku: "П-01", unitId: "unit", categoryId: "category", minStock: 7, comment }, tx);
   assert.ok(result.ok);
+  assert.deepEqual(queries, [
+    { sql: 'SELECT id FROM "MaterialUnit" WHERE id=? FOR SHARE', values: ["unit"] },
+    { sql: 'SELECT id FROM "MaterialCategory" WHERE id=? FOR SHARE', values: ["category"] },
+    { sql: 'SELECT count(*)::integer AS count FROM "StockMovement" WHERE "materialId"=?', values: ["material"] },
+  ]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].operationRootId, undefined);
+  assert.deepEqual(rows[0].reversal, { kind: "warehouse.catalog", version: 1, data: {
+    entity: "material", expectedRevision: 0, createdLifecycle: true, movementCount: 0,
+    restore: { name: "ЛДСП", comment: comment.trim(), active: false, sku: "П-01", unitId: "unit", categoryId: "category", minStock: "7" },
+  } });
   assert.deepEqual(rows[0].newValue, { name: "ЛДСП", sku: "П-01", unitId: "unit", unit: "м²", purchasePrice: 0 });
   const view = presentation(rows[0]);
+  assert.deepEqual(view.links.map(({ type, id }) => ({ type, id })), [
+    { type: "materialUnit", id: "unit" }, { type: "materialCategory", id: "category" },
+  ]);
   assert.equal(view.entity.label, "Материал ЛДСП");
   assert.deepEqual(view.contexts, []);
   const values = new Map(view.changes.map(change => [change.path, change.after]));
