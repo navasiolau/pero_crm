@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { WORK_RATES_SCOPE } from "../../lib/estimate-rates";
 import type { ApiToken } from "@prisma/client";
 
 export const TOKEN_PREFIX = "pero_";
@@ -21,10 +22,11 @@ interface TokenStore {
 }
 
 export function createTokenVerifier(store: TokenStore) {
-  return async (authorization: string | null): Promise<VerifiedToken | null> => {
+  return async (authorization: string | null, audience: "general" | "work-rates" = "general"): Promise<VerifiedToken | null> => {
     if (!authorization?.startsWith(`Bearer ${TOKEN_PREFIX}`)) return null;
     const row = await store.findToken(hashToken(authorization.slice("Bearer ".length)));
     if (!row || row.revokedAt) return null;
+    if (audience === "general" && row.scopes.includes(WORK_RATES_SCOPE)) return null;
 
     // createdById — владелец выданного из UI ключа. Ключ отсутствующего или
     // отключённого пользователя не работает даже без web-сессии. Отдельные
