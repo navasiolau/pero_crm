@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { createRequire, Module } from "node:module";
+import { mkdtempSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { beforeEach, afterEach, test } from "node:test";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { guardedModuleCache } from "./helpers/guarded-module-cache";
@@ -206,4 +209,80 @@ test("fixture removes only its loaded target closure and retains unrelated new c
     scope.restore(); assert.equal(require.cache[file], foreign);
     assert.equal(require.cache[target], priorCache.get(target));
   } finally { if (original) require.cache[file] = original; else delete require.cache[file]; }
+});
+
+test("fixture adopts an allowlisted target loaded by the real reversal registry", () => {
+  scope.restore();
+  const root = "../src/server/changelog/reversal-core", dependent = "../src/server/warehouse/expense-receipt-core";
+  const rootFile = require.resolve(root), dependentFile = require.resolve(dependent);
+  const beforeRoot = require.cache[rootFile], beforeDependent = require.cache[dependentFile];
+  scope = guardedModuleCache(import.meta.url, { targets: [root, dependent], allowedOverrides: [], overrides: {}, prisma: {} });
+  try {
+    const reversal = scope.load<typeof import("../src/server/changelog/reversal-core")>(root);
+    assert.equal(typeof reversal.reverseJournalActionInTransaction, "function");
+    const imported = require.cache[dependentFile];
+    assert.ok(imported);
+    assert.equal(scope.load(dependent), imported.exports);
+  } finally { scope.restore(); }
+  assert.equal(require.cache[rootFile], beforeRoot);
+  assert.equal(require.cache[dependentFile], beforeDependent);
+});
+
+test("fixture refuses a reserved target injected outside its load and preserves the foreign entry", () => {
+  scope.restore();
+  const root = "../src/server/payroll/cash-core", reserved = "./helpers/visibility-fixture";
+  const rootFile = require.resolve(root), reservedFile = require.resolve(reserved), previous = require.cache[reservedFile];
+  scope = guardedModuleCache(import.meta.url, { targets: [root, reserved], allowedOverrides: [], overrides: {}, prisma: {} });
+  scope.load(root);
+  const foreign = new Module(reservedFile);
+  foreign.filename = reservedFile; foreign.loaded = true; foreign.exports = { foreign: true };
+  foreign.parent = require.cache[rootFile];
+  require.cache[reservedFile] = foreign;
+  try {
+    assert.throws(() => scope.load(reserved), /FIXTURE_CACHE_CONFLICT/);
+    assert.throws(() => scope.restore(), /FIXTURE_RESTORE_CONFLICT/);
+    assert.equal(require.cache[reservedFile], foreign);
+    assert.deepEqual(Object.getOwnPropertyDescriptor(globalThis, "prisma"), priorPrisma);
+  } finally { if (previous) require.cache[reservedFile] = previous; else delete require.cache[reservedFile]; }
+});
+
+test("fixture cleans transitive targets after a throwing require and rejects injected cache during load", () => {
+  scope.restore();
+  const path = mkdtempSync(join(tmpdir(), "pero-guarded-cache-"));
+  const root = join(path, "root.cjs"), dependent = join(path, "dependent.cjs");
+  writeFileSync(dependent, "module.exports = { owned: true };");
+  writeFileSync(root, 'require("./dependent.cjs"); throw Error("TARGET_INIT_FAILED");');
+  const open = () => guardedModuleCache(import.meta.url, {
+    targets: [root, dependent], allowedOverrides: [], overrides: {}, prisma: {},
+  });
+  try {
+    scope = open();
+    assert.throws(() => scope.load(root), /TARGET_INIT_FAILED/);
+    assert.equal(require.cache[root], undefined);
+    assert.deepEqual(scope.load(dependent), { owned: true });
+    scope.restore();
+    assert.equal(require.cache[dependent], undefined);
+
+    writeFileSync(root, [
+      'const file = require.resolve("./dependent.cjs");',
+      'const injected = new (require("node:module").Module)(file);',
+      'injected.filename = file; injected.parent = module; injected.loaded = true;',
+      'injected.exports = { foreign: true }; require.cache[file] = injected;',
+    ].join("\n"));
+    scope = open();
+    assert.throws(() => scope.load(root), /FIXTURE_CACHE_CONFLICT/);
+    const cacheEntry = (file: string): NodeJS.Module | undefined => require.cache[file];
+    const foreign = cacheEntry(dependent);
+    assert.deepEqual(foreign?.exports, { foreign: true });
+    assert.throws(() => scope.restore(), /FIXTURE_RESTORE_CONFLICT/);
+    assert.equal(require.cache[dependent], foreign);
+    assert.equal(require.cache[root], undefined);
+  } finally {
+    try { scope.restore(); } finally {
+      delete require.cache[dependent];
+      unlinkSync(root);
+      unlinkSync(dependent);
+      rmdirSync(path);
+    }
+  }
 });
