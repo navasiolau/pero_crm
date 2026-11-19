@@ -1,6 +1,8 @@
 // Синхронизация реестра плагинов с БД при старте сервера (§14).
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
+    const { assertRestrictedRuntimeDatabase } = await import("@/server/access/runtime-db-role");
+    await assertRestrictedRuntimeDatabase();
     const { syncPlugins } = await import("@/server/plugins/sync");
     await syncPlugins();
     const { startDomainEventWorker } = await import("@/server/plugins/event-worker");

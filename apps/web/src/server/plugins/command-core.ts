@@ -1,3 +1,4 @@
+import { assertPluginAuditEntry, assertPluginEventType, pluginReadDatabase } from "./read-database";
 import type { Prisma } from "@prisma/client";
 import type { PluginContext, PluginManifest } from "@pero/plugin-sdk";
 import { ADMIN_ROLES } from "@/lib/roles";
@@ -38,16 +39,18 @@ async function executeCommand(tx: Prisma.TransactionClient, actor: JournalActor,
   ]);
   const eventIds: string[] = [], logs: { status: "ok" | "error"; message: string }[] = [], pluginActor = `plugin:${manifest.id}`;
   const context: PluginContext = {
-    pluginId: manifest.id, actor: pluginActor, settings, db: tx,
+    pluginId: manifest.id, actor: pluginActor, settings, db: pluginReadDatabase(tx, manifest.permissions),
     logger: { info: async message => { logs.push({ status: "ok", message: String(sanitizeJournalValue(message)) }); },
       error: async message => { logs.push({ status: "error", message: String(sanitizeJournalValue(message)) }); } },
     audit: async entry => {
+      assertPluginAuditEntry(manifest.id, entry);
       await writeChangeLogInTransaction(tx, { ...entry, actorType: "plugin", actorId: pluginActor, actorName: manifest.name, source: "plugin" }, {
         actor: { type: "system", id: "system", name: "Система" }, ...(actor.type === "user" ? { initiator: { id: actor.id, name: actor.name } } : {}), reason: `Команда модуля: ${command.name}`,
         ...(entry.entity === "plugin" && entry.entityId === manifest.id ? { entity: { label: `Модуль ${manifest.name}`, href: `/settings/modules/${encodeURIComponent(manifest.id)}` } } : {}),
       });
     },
     emit: async (type, payload) => {
+      assertPluginEventType(manifest.id, type);
       const event = await tx.domainEvent.create({ data: { type, payload: JSON.parse(JSON.stringify(payload ?? {})) as Prisma.InputJsonValue, actor: pluginActor } });
       eventIds.push(event.id);
     },

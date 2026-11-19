@@ -236,7 +236,7 @@ export function inspectWeb(target, id, fault = false) {
     ports['3000/tcp'][0].HostPort === (fault ? '3101' : '3100'), 'web-network-port');
   requireCi(container.HostConfig.AutoRemove === true && container.Mounts.every(mount => mount.Type === 'tmpfs'), 'web-mounts');
   requireCi(container.Config.Cmd.join(' ') === (fault ? 'node apps/web/server.js' :
-    'sh -c prisma migrate deploy --schema apps/web/prisma/schema.prisma && node apps/web/server.js'), 'web-command');
+    'sh apps/web/runtime-start.sh'), 'web-command');
   for (const [key, value] of Object.entries(webEnvironment(target, fault))) {
     requireCi(container.Config.Env.includes(`${key}=${value}`), `web-env-${key}`);
   }
