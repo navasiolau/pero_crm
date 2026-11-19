@@ -11,6 +11,7 @@ import {productsTotal,projectTotalText,type ProjectServices} from "@/lib/product
 import {PROJECT_SERVICE_FIELDS, isProjectServiceField, projectServicePatch, projectServiceSnapshot, ProjectServicesConflict} from "@/lib/project-services";
 import {withTaskTransaction,type TaskTransaction} from "@/server/tasks/transaction";
 import type {DomainActor} from "./core";
+import { projectFieldCommand } from './field-reversal-data';
 import {patchProjectContactInTransaction} from "./contact-core";
 import {journalPersonLinks,projectJournalContext} from "./journal";
 import {projectPricingProjectionSchema,projectPatchSchema,malformedProjectPatch,projectMoneySchema,type ProjectPatch,type ProjectPatchResult,type ProjectPatchValue,type ProjectPatchDerived,type ProjectFullBaseline} from "./patch-contract";
@@ -39,6 +40,16 @@ export function projectFullBaseline(project:Pick<Project,LegacyField>):ProjectFu
 async function validateManager(tx:Prisma.TransactionClient,value:ProjectPatchValue) {
  if(value!==null&&!await tx.user.findFirst({where:{id:value,active:true,roles:{hasSome:MANAGER_ROLES}},select:{id:true}}))throw Error("Выберите активного менеджера");
 }
+export async function updateProjectCardValuesInTransaction(tx: Prisma.TransactionClient, actor: DomainActor,
+ project: { id: string; currency: string }, data: Record<string, ProjectPatchValue>) {
+ if (Object.hasOwn(data, "managerId")) await validateManager(tx, data.managerId);
+ if (services.some(field => Object.hasOwn(data, field))) assertProjectMoneyCurrency(data.currency ?? project.currency);
+ const after = await tx.project.update({ where: { id: project.id }, data });
+ const event = await tx.domainEvent.create({ data: { type: "project.updated", actor: actor.id,
+  payload: { projectId: project.id, ...(Object.keys(data).length === 1 ? { field: Object.keys(data)[0] } : { fields: Object.keys(data) }) } } });
+ return { after, eventId: event?.id };
+}
+
 async function lightweightTotal(tx:Prisma.TransactionClient,projectId:string,project:ProjectServices) {
  const products=await tx.product.findMany({where:{...liveProductWhere,projectId},select:{expectedPrice:true,quantity:true}});
  // Неполная оценка не превращается в известный ноль. Запись услуги при этом валидна.
@@ -66,7 +77,7 @@ export async function patchProjectCore(actor:DomainActor,input:ProjectPatch,tran
  const receiptId=`project-inline:${patch.clientMutationId}`,fingerprint=createHash("sha256").update(JSON.stringify(patch)).digest("hex");
  try{return await transaction(async tx=>{
   await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${patch.projectId} FOR UPDATE`;
-  const project=await tx.project.findUnique({where:{...liveProjectWhere,id:patch.projectId},select:{id:true,number:true,title:true,clientId:true,managerId:true,address:true,currency:true,servicesTotal:true,proposalRoundingAdjustment:true,delivery:true,unloading:true,installation:true}});
+  const project=await tx.project.findUnique({where:{...liveProjectWhere,id:patch.projectId},select:{id:true,number:true,title:true,clientId:true,managerId:true,address:true,contactPerson:true,fieldRevisions:true,currency:true,servicesTotal:true,proposalRoundingAdjustment:true,delivery:true,unloading:true,installation:true}});
   if(!project)return{...identity,kind:"not-found",error:"Проект не найден"};
   const receipt=await tx.changeLog.findUnique({where:{id:receiptId}});
   if(receipt){const saved=receipt.newValue;
@@ -74,6 +85,7 @@ export async function patchProjectCore(actor:DomainActor,input:ProjectPatch,tran
    if(!saved.result||typeof saved.result!=="object"||Array.isArray(saved.result))throw Error("Повреждён результат сохранения");
    return{...saved.result as unknown as Extract<ProjectPatchResult,{kind:"saved"}>,repeated:true};
   }
+  let reversal: ReturnType<typeof projectFieldCommand>;
   let result:Extract<ProjectPatchResult,{kind:"saved"}>;
   if(patch.field==="clientId"||patch.field==="address"||patch.field==="client.phone"||patch.field==="client.address"||patch.field==="contactPerson"){
    const shared=await patchProjectContactInTransaction(actor,{projectId:patch.projectId,field:patch.field==="client.phone"?"phone":patch.field==="client.address"?"clientAddress":patch.field,value:patch.value,expectedValue:patch.expectedValue,...(patch.field==="client.phone"||patch.field==="client.address"||patch.field==="contactPerson"?{expectedClientId:patch.expectedClientId}:{})},tx);
@@ -83,18 +95,19 @@ export async function patchProjectCore(actor:DomainActor,input:ProjectPatch,tran
    const current=canonical(patch.field,project[patch.field]);if(current!==canonical(patch.field,patch.expectedValue))return{...identity,kind:"conflict",error:"Поле изменено другим пользователем",currentValue:current};
    const value=normalize(patch.field,patch.value);if(current===value)return{...identity,kind:"saved",value,noOp:true};
    if(services.some(field=>field===patch.field))assertProjectMoneyCurrency(project.currency);
-   if(patch.field==="managerId")await validateManager(tx,value);
+
    const data=isProjectServiceField(patch.field)?projectServicePatch(projectServiceSnapshot(project),patch.field,value,"expectedServices"in patch?patch.expectedServices:undefined):{[patch.field]:value};
-   await tx.project.update({where:{id:patch.projectId},data});
+   const { after } = await updateProjectCardValuesInTransaction(tx, actor, project, data);
+   if (after) reversal = projectFieldCommand(isProjectServiceField(patch.field) ? "services" : patch.field, project, after);
    const derived:ProjectPatchDerived={};
    if(services.some(field=>field===patch.field)){
     const prices={...project,...data};Object.assign(derived,await lightweightTotal(tx,patch.projectId,prices));
    }
    if(patch.field==="managerId")derived.managerLabel=value?(await tx.user.findFirst({where:{id:value},select:{name:true}}))?.name??null:null;
    result={...identity,kind:"saved",value,derived};
-   await tx.domainEvent.create({data:{type:"project.updated",actor:actor.id,payload:{projectId:patch.projectId,field:patch.field}}});
+
   }
-  if(!result.noOp)await writeChangeLogInTransaction(tx, {id:receiptId,actorType:"user",actorId:actor.id,actorName:actor.name,source:actor.source,entity:"project",entityId:patch.projectId,action:"inline.update",field:patch.field,oldValue:json({value:patch.expectedValue,...(isProjectServiceField(patch.field)?{services:projectServiceSnapshot(project)}:{})}),newValue:json({fingerprint,result})},
+  if(!result.noOp)await writeChangeLogInTransaction(tx, {id:receiptId,actorType:"user",actorId:actor.id,actorName:actor.name,source:actor.source,entity:"project",entityId:patch.projectId,action:"inline.update",field:patch.field,reversal,oldValue:json({value:patch.expectedValue,...(isProjectServiceField(patch.field)?{services:projectServiceSnapshot(project)}:{})}),newValue:json({fingerprint,result})},
    {...projectJournalContext(project),kind:['clientId','address','client.phone','client.address','contactPerson'].includes(patch.field)?'receipt':'event',
     before:isProjectServiceField(patch.field)?projectServiceSnapshot(project):{[patch.field]:patch.expectedValue},
     after:isProjectServiceField(patch.field)?projectServiceSnapshot({...project,...result.derived}):{[patch.field]:result.value},
@@ -129,7 +142,7 @@ export async function updateProjectFieldsCore(actor:DomainActor,projectId:string
    if(selected.includes("servicesTotal")&&data.servicesTotal!==null)Object.assign(data,projectServicePatch(snapshot,"servicesTotal",data.servicesTotal,expected));
    else for(const field of selected)Object.assign(data,projectServicePatch(snapshot,field,data[field],expected));
   }
-  if("managerId"in data)await validateManager(tx,data.managerId);
+
   // Все CAS проверены до первого shared write; ошибки далее бросаются для rollback.
   for(const field of ["address","clientId"] as const){if(!(field in data))continue;
    const shared=await patchProjectContactInTransaction(actor,{projectId,field,value:data[field],expectedValue:canonical(field,current[field])},tx);
@@ -137,10 +150,19 @@ export async function updateProjectFieldsCore(actor:DomainActor,projectId:string
    delete data[field];
   }
   if(Object.keys(data).length){
-   await tx.project.update({where:{id:projectId},data});
-   await writeChangeLogInTransaction(tx, {actorType:"user",actorId:actor.id,actorName:actor.name,source:actor.source,entity:"project",entityId:projectId,action:"update",oldValue:json(Object.fromEntries(Object.keys(data).map(field=>[field,canonical(field,current[field as LegacyField])]))),newValue:json(data)},
-    {...projectJournalContext(current),links:'managerId'in data?await journalPersonLinks(tx,[current.managerId,data.managerId],actor):[]});
-   await tx.domainEvent.create({data:{type:"project.updated",actor:actor.id,payload:{projectId,fields:Object.keys(data)}}});
+   const { after } = await updateProjectCardValuesInTransaction(tx, actor, current, data);
+   const audit = { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
+    entity: "project", entityId: projectId, action: "update" };
+   for (const field of ["title", "managerId", "services", "currency"] as const) {
+    const selected = field === "services" ? services.some(key => key in data) : field in data;
+    if (!selected) continue;
+    const before = field === "services" ? projectServiceSnapshot(current) : canonical(field, current[field]);
+    const value = field === "services" ? projectServiceSnapshot({ ...current, ...data }) : data[field];
+    await writeChangeLogInTransaction(tx, { ...audit, field,
+     reversal: field !== "currency" && after ? projectFieldCommand(field, current, after) : undefined,
+     oldValue: before, newValue: value }, { ...projectJournalContext(current),
+     links: field === "managerId" ? await journalPersonLinks(tx, [current.managerId, data.managerId], actor) : [] });
+   }
   }
   return{ok:true,noOp:false};
  });}catch(error){return{ok:false,error:error instanceof Error?error.message:"Не удалось изменить проект"};}

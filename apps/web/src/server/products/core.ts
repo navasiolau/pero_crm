@@ -6,7 +6,8 @@ import {softDeleteProductCore} from './delete-core';
 import type {ProductDeleteInput,ProductDeleteMutationResult} from './delete-contract';
 import { renumberActiveProductsInTransaction } from "./numbering";
 import { patchProductContactInTransaction } from "../projects/contact-core";
-import { titleReversalCommand } from './scalar-reversal';
+import { PRODUCT_CARD_FIELDS, productFieldCommand, type ProductCardField } from './scalar-reversal';
+import { persistTechnicalSpecifications, technicalSpecificationsCommand } from './specification-reversal';
 import { createHash, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -69,7 +70,7 @@ export const updateSchema = z.object({
 
 export type CreateProductInput = z.input<typeof createSchema>;
 export type UpdateProductInput = z.infer<typeof updateSchema>;
-type ProductValues = Omit<UpdateProductInput, "expectedPrice"> & {expectedPrice?: string | number | null};
+export type ProductValues = Omit<UpdateProductInput, "expectedPrice"> & {expectedPrice?: string | number | null};
 export type ProductUpdateBaseline = Partial<Record<keyof UpdateProductInput, ProductScalarValue>>;
 const canonical = (field: string, value: unknown): ProductScalarValue => {
   if (value === null || value === undefined) return null;
@@ -168,7 +169,7 @@ export async function createProductInTransaction(tx: Prisma.TransactionClient, a
   return { ok: true as const, product, numberChanges };
 }
 
-export async function updateProductValues(actor: DomainActor, productId: string, data: ProductValues, baseline: ProductUpdateBaseline, tx: Prisma.TransactionClient) {
+export async function updateProductValues(actor: DomainActor, productId: string, data: ProductValues, baseline: ProductUpdateBaseline, tx: Prisma.TransactionClient, options: { operationRootId?: string; quantityRootId?: string; restoreRecordedValue?: boolean } = {}) {
     if(data.quantity!==undefined)await warehouseMetadataGate(tx);
     await lockProductRow(tx, productId);
     const visibilityActor = hasAnyRole(actor.roles, MANAGER_ROLES) ? actor : await resolveVisibilityActor(tx, actor);
@@ -186,7 +187,7 @@ export async function updateProductValues(actor: DomainActor, productId: string,
       if (canonical(key, before[key]) !== canonical(key, baseline[key])) return { ok: false as const, error: "Поле изменено другим пользователем" };
     }
     // Неизменённый legacy raw текст не очищаем даже при правке соседнего поля.
-    if (data.description !== undefined && !isProductDescriptionUnchanged(data.description, before.description))
+    if (!options.restoreRecordedValue && data.description !== undefined && !isProductDescriptionUnchanged(data.description, before.description))
       data.description = normalizeProductDescription(data.description);
     const changed = Object.keys(data).some((key) => canonical(key, before[key as keyof typeof before]) !== canonical(key, data[key as keyof UpdateProductInput]));
     if (!changed) return { ok: true as const, before, noOp: true as const };
@@ -195,10 +196,11 @@ export async function updateProductValues(actor: DomainActor, productId: string,
     productLineTotal(data.expectedPrice === undefined ? before.expectedPrice ?? null : data.expectedPrice, count);
     if (data.engineerId && data.engineerId !== before.engineerId && !await tx.user.findFirst({ where: { id: data.engineerId, active: true, roles: { hasSome: ["ENGINEER"] } }, select: { id: true } }))
       return { ok: false as const, error: "Выберите активного сотрудника с ролью инженера" };
-    if (count !== oldCount) await recalculateQuantity(tx, { ...before, quantity: oldCount }, count, actor);
+    if (count !== oldCount) await recalculateQuantity(tx, { ...before, quantity: oldCount }, count, actor, options.quantityRootId ?? options.operationRootId);
     const capture = initialPriceCapture(before, data.expectedPrice);
     const after = await tx.product.update({ where: { id: productId }, data: { ...data, ...capture } });
     if ("initialPrice" in capture) await writeChangeLogInTransaction(tx, {
+
       actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
       entity: "product", entityId: productId, action: "initialPrice.capture",
       oldValue: { initialPrice: null, initialPriceCaptureEligible: true },
@@ -219,23 +221,21 @@ export async function updateProductCore(actor: DomainActor, productId: string, i
   const data=parsed.data;
   if (!hasAnyRole(actor.roles, MANAGER_ROLES) && Object.keys(data).some(key=>key!=="description")) return { ok: false as const, error:"Инженер правит только технический блок" };
   try { return await transaction(async tx=> {
-    const result=await updateProductValues(actor,productId,data,baseline,tx);
+    const quantityRootId = data.quantity !== undefined ? randomUUID() : undefined;
+
+    const result=await updateProductValues(actor,productId,data,baseline,tx,{quantityRootId});
     if (!result.ok) return result;
     if (!result.noOp) {
-      const reversal = data.title === undefined ? undefined : titleReversalCommand(result.before, result.after);
-      const audit = { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
-        entity: "product", entityId: productId, action: "update" };
-      const context = productJournalContext(reversal ? result.after : result.before);
-      const { title: _title, ...otherFields } = data;
-      if (reversal) await writeChangeLogInTransaction(tx, {
-        ...audit, field: "title", reversal, oldValue: result.before.title, newValue: result.after.title,
-      }, context);
-      const fields = reversal ? otherFields : data;
-      const fieldKeys = Object.keys(fields) as (keyof UpdateProductInput)[];
-      if (fieldKeys.some(key => canonical(key, result.before[key]) !== canonical(key, data[key]))) await writeChangeLogInTransaction(tx,
-        { ...audit, oldValue: json(baseline), newValue: json(fields) },
-        { ...context, before: businessSnapshot(result.before, fieldKeys), after: json(fields),
-          links: "engineerId" in fields ? await journalPersonLinks(tx, [result.before.engineerId, fields.engineerId], actor) : [] });
+      for (const field of PRODUCT_CARD_FIELDS) {
+        if (data[field] === undefined || canonical(field, result.before[field]) === canonical(field, data[field])) continue;
+        const reversal = productFieldCommand(field, result.before, result.after);
+        await writeChangeLogInTransaction(tx, {
+          actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
+          entity: "product", entityId: productId, action: "update", field, reversal, id: field === "quantity" ? quantityRootId : undefined,
+          oldValue: canonical(field, result.before[field]), newValue: canonical(field, data[field]),
+        }, { ...productJournalContext(result.before),
+          links: field === "engineerId" ? await journalPersonLinks(tx, [result.before.engineerId, data.engineerId], actor) : [] });
+      }
     }
     return result;
   }); } catch(error) { return {ok:false as const,error:error instanceof Error?error.message:"Не удалось изменить изделие"}; }
@@ -277,7 +277,7 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
       await lockProductRow(tx, patch.productId);
       return tx.product.findFirst({ where, select: {
         id: true, number: true, title: true, kind: true, description: legacy || technical, technicalSpecifications: legacy || technical,
-        quantity: true, expectedPrice: true, engineerId: true, status: true,
+        quantity: true, expectedPrice: true, engineerId: true, status: true, fieldRevisions: true,
       } });
     })();
     if (!contact && !current) return {...identity,kind:"not-found",error:"Изделие не найдено или недоступно"};
@@ -293,7 +293,7 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
     }
     if (legacy && current?.technicalSpecifications != null)
       return {...identity,kind:"conflict",error:"Технические характеристики уже обновлены. Откройте карточку заново"};
-    let reversal: ReturnType<typeof titleReversalCommand>;
+    let reversal: ReturnType<typeof productFieldCommand>;
     let result: Extract<ProductPatchResult,{kind:'saved'}>;
     if(patch.field==="client.phone"||patch.field==="project.address"||patch.field==="project.clientId") {
       const shared=await patchProductContactInTransaction(actor,{productId:patch.productId,
@@ -313,12 +313,15 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
         return {...identity,kind:"conflict",error:"Характеристики обновлены из КП. Откройте карточку заново"};
       const change = applySpecificationPatch(before, patch);
       if (!change.ok) return {...identity,kind:"conflict",error:change.error,currentValue:change.currentValue};
-      if (!change.noOp) await tx.product.update({ where: { id: patch.productId }, data: { technicalSpecifications: change.next } });
+      const after = change.noOp ? null : await persistTechnicalSpecifications(tx, patch.productId, change.next);
+      const reversal = after ? technicalSpecificationsCommand({
+        technicalSpecifications: current.technicalSpecifications, fieldRevisions: current.fieldRevisions,
+      }, after) : undefined;
       result = {...identity,kind:"saved",value:change.value,noOp:change.noOp,derived:{technicalSpecificationSectionId:change.sectionId,technicalSpecificationsEditRevision:change.next.editRevision ?? 0,
         ...(materializing && !change.noOp ? { technicalSpecifications: structuredClone(change.next) } : {})}};
       await writeChangeLogInTransaction(tx, {
         id: receiptId, actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
-        entity: "product", entityId: patch.productId, action: change.noOp ? "inline.receipt" : "inline.update", field: patch.field,
+        entity: "product", entityId: patch.productId, action: change.noOp ? "inline.receipt" : "inline.update", field: patch.field, reversal,
         ...(change.noOp ? { newValue: json({ fingerprint, result }) } : {
           oldValue: json({ technicalSpecifications: current.technicalSpecifications ?? null }),
           newValue: json({ fingerprint, result, technicalSpecifications: change.next }),
@@ -337,9 +340,9 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
       else if(typeof value==="string") value=value.trim()||(patch.field==="title"?value:null);
       if(previous===value)return {...identity,kind:"saved",value,noOp:true};
       const data = {[patch.field]:value} as ProductValues;
-      const mutation=await updateProductValues(actor,patch.productId,data,{[patch.field]:patch.expectedValue},tx);
+      const mutation=await updateProductValues(actor,patch.productId,data,{[patch.field]:patch.expectedValue},tx,{operationRootId:receiptId});
       if(!mutation.ok)return {...identity,kind:"validation",error:mutation.error};
-      if (patch.field === 'title' && !mutation.noOp) reversal = titleReversalCommand(mutation.before, mutation.after);
+      if (!mutation.noOp) reversal = productFieldCommand(patch.field as ProductCardField, mutation.before, mutation.after);
       const derived:ProductPatchDerived={};
       if(patch.field==="quantity"||patch.field==="expectedPrice") {
         const quantity=patch.field==="quantity"?Number(value):current.quantity;

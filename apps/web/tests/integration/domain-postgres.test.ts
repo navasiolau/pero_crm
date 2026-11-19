@@ -367,6 +367,54 @@ test("journal/work-task-native-soft-delete-graph-file-create-and-independent-edi
   await verifyWorkTaskReversalNative(tx);
 }));
 
+test("journal/native-card-quantity-price-and-service-reversals", async () => fixture.rollback(async (tx, rows) => {
+  const reversal = scope.load<typeof import("../../src/server/changelog/reversal-core")>("../src/server/changelog/reversal-core");
+  const projectFields = scope.load<typeof import("../../src/server/projects/project-field-core")>("../src/server/projects/project-field-core");
+  const director = actorOf(await rows.user("card-undo-director", ["DIRECTOR"]));
+  const project = await rows.project("card-undo-project", { currency: "BYN", delivery: "12.00" });
+  const product = await rows.product("card-undo-product", project.id, { quantity: 2, initialPriceCaptureEligible: true });
+  const work = await tx.work.create({ data: {
+    id: rows.id("card-undo-work"), projectId: project.id, productId: product.id, title: "Проверка нормы",
+    quantity: "3.00", quantityPerUnit: "1.50", priceSnapshot: "10.00", total: "30.00",
+    unitSnapshot: "шт", createdById: director.id,
+  } });
+  const quantityId = randomUUID();
+  assert.equal((await products.patchProductCore(director, {
+    productId: product.id, field: "quantity", value: 4, expectedValue: 2, clientMutationId: quantityId,
+  }, transactionIn(tx))).kind, "saved");
+  const quantityEntry = `product-inline:${quantityId}`;
+  assert.equal((await tx.work.findUniqueOrThrow({ where: { id: work.id } })).quantity.toFixed(2), "6.00");
+  assert.equal(await tx.changeLog.count({ where: { operationRootId: quantityEntry, entity: "work" } }), 1);
+
+  const priceId = randomUUID();
+  assert.equal((await products.patchProductCore(director, {
+    productId: product.id, field: "expectedPrice", value: "99.00", expectedValue: null, clientMutationId: priceId,
+  }, transactionIn(tx))).kind, "saved");
+
+  const productRequest = (entryId: string) => ({ entryId, requestId: randomUUID(), scope: { kind: "product", id: product.id } });
+  const quantityUndo = await reversal.reverseJournalActionInTransaction(tx, director.id, productRequest(quantityEntry));
+  assert.equal((await tx.product.findUniqueOrThrow({ where: { id: product.id } })).expectedPrice?.toFixed(2), "99.00");
+  assert.equal((await tx.work.findUniqueOrThrow({ where: { id: work.id } })).quantity.toFixed(2), "3.00");
+  assert.equal(await tx.changeLog.count({ where: { operationRootId: quantityUndo.reversalId, entity: "work" } }), 1);
+
+  await reversal.reverseJournalActionInTransaction(tx, director.id, productRequest(`product-inline:${priceId}`));
+  const repriced = await tx.product.findUniqueOrThrow({ where: { id: product.id } });
+  assert.equal(repriced.expectedPrice, null);
+  assert.equal(repriced.initialPrice?.toFixed(2), "99.00");
+
+  const serviceId = randomUUID();
+  assert.equal((await projectFields.patchProjectCore(director, {
+    projectId: project.id, field: "servicesTotal", value: "30.00", expectedValue: null, clientMutationId: serviceId,
+    expectedServices: { servicesTotal: null, delivery: "12.00", unloading: null, installation: null },
+  }, transactionIn(tx))).kind, "saved");
+  await reversal.reverseJournalActionInTransaction(tx, director.id, { entryId: `project-inline:${serviceId}`,
+    requestId: randomUUID(), scope: { kind: "project", id: project.id } });
+  const restoredProject = await tx.project.findUniqueOrThrow({ where: { id: project.id } });
+  assert.equal(restoredProject.servicesTotal, null);
+  assert.equal(restoredProject.delivery?.toFixed(2), "12.00");
+  await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+}));
+
 test("journal/startup-register-locks-native-types", async () => fixture.rollback(async (tx, rows) => {
   const actor = actorOf(await rows.user("journal-startup-admin", ["ADMIN"]));
   // Singleton использует уже открытый rollback-only tx; новая связь, сеть и worker loops не запускаются.

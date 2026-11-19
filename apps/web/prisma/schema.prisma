@@ -190,6 +190,7 @@ model Client {
 // целого дома). Этапы воронки — на проекте (§6); платежи, маржа и
 // экономика — тоже на проекте (§11). Стоимость проекта = Σ цен изделий.
 model Project {
+  fieldRevisions Json @default("{}")
   deletedAt DateTime?
   deletedById String? // actor snapshot; no cascade or reassignment
   id                     String       @id @default(cuid())
@@ -277,6 +278,7 @@ model Product {
   suffixInt        Int?
   title            String // название изделия
   titleRevision    Int    @default(0)
+  fieldRevisions   Json   @default("{}")
   quantity         Int          @default(1) // одинаковых экземпляров в карточке
   kind             String? // вид изделия (текстовое поле, из legacy f2641)
   status           ProductStatus @default(DRAFT)
