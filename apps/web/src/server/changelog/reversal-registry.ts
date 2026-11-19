@@ -1,4 +1,6 @@
-import { productTitleReversal } from "@/server/products/title-reversal";
+import { productSpecificationReversal } from '@/server/products/specification-reversal';
+import { projectFieldReversals } from '@/server/projects/field-reversal';
+import { productFieldReversals } from "@/server/products/title-reversal";
 import { paymentVisibilityReversal } from "@/server/payments/visibility-reversal";
 import { retainedFileReversal } from "@/server/files/retained-file-reversal";
 import { expenseReceiptReversal } from "@/server/warehouse/expense-receipt-reversal";
@@ -11,7 +13,9 @@ import { payrollAccrualReversal } from '@/server/payroll/accrual-reversal';
 import { payoutVisibilityReversal } from '@/server/payroll/payout-reversal';
 export const journalReversals = [
   payrollAccrualReversal, payoutVisibilityReversal,
-  productTitleReversal,
+  ...productFieldReversals,
+  productSpecificationReversal,
+  ...projectFieldReversals,
   paymentVisibilityReversal,
   retainedFileReversal,
   expenseReceiptReversal,

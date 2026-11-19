@@ -5,7 +5,8 @@ import type { Prisma, Product } from "@prisma/client";
 import type { DomainActor } from "@/server/actor";
 import { createProductInTransaction } from "@/server/products/core";
 import { automationJournalContext, productJournalContext } from "@/server/projects/journal";
-import { titleReversalCommand } from '@/server/products/scalar-reversal';
+import { productFieldCommand } from '@/server/products/scalar-reversal';
+import { technicalSpecificationsCommand } from '@/server/products/specification-reversal';
 import { recalculateQuantity } from "@/server/products/quantity-core";
 import { stabilizeProductNumberLinks } from "@/server/products/numbering";
 import { lockWarehouseMetadata, assertWarehouseMetadataWritable } from "@/server/warehouse/gate";
@@ -22,14 +23,18 @@ const commercialSnapshot = (product: Product) => ({
 });
 
 async function auditProductSync(tx: Prisma.TransactionClient, actor: DomainActor,
-  proposalId: string, before: Product, after: Product, operationRootId?: string) {
-  const reversal = titleReversalCommand(before, after);
-  if (reversal && !operationRootId) await writeChangeLogInTransaction(tx, {
-    actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
-    entity: "product", entityId: after.id, action: "update", field: "title", reversal,
-    oldValue: before.title, newValue: after.title,
-  }, { ...productJournalContext(after), ...automationJournalContext(actor, "Обновление названия изделия из КП"),
-    links: [{ type: "commercialProposal", id: proposalId, label: "Коммерческое предложение" }] });
+  proposalId: string, before: Product, after: Product, quantityRootId?: string, operationRootId?: string) {
+  const audit = { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
+    entity: "product", entityId: after.id, action: "update" };
+  const context = { ...productJournalContext(after), ...automationJournalContext(actor, "Обновление изделия из КП"),
+    links: [{ type: "commercialProposal", id: proposalId, label: "Коммерческое предложение" }] };
+  for (const field of ["title", "kind", "quantity", "technicalSpecifications"] as const) {
+    const reversal = field === "technicalSpecifications" ? technicalSpecificationsCommand(before, after) : productFieldCommand(field, before, after);
+    if (!operationRootId && (reversal || (field === "quantity" && quantityRootId))) await writeChangeLogInTransaction(tx, {
+      ...audit, id: field === "quantity" ? quantityRootId : undefined, field, reversal,
+      oldValue: before[field], newValue: after[field],
+    }, context);
+  }
   await writeChangeLogInTransaction(tx, {
     actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
     entity: "product", entityId: after.id, action: "kp.synchronize", operationRootId,
@@ -80,7 +85,7 @@ export async function synchronizeProposalItemsInTransaction(
     const after = await tx.product.update({ where: { id: product.id }, data: {
       deletedAt: changedAt, deletedById: actor.id,
     } });
-    await auditProductSync(tx, actor, proposal.id, product, after, operationRootId);
+    await auditProductSync(tx, actor, proposal.id, product, after, undefined, operationRootId);
     previousNumbers.set(product.id, product.number);
     changed = true;
   }
@@ -154,7 +159,8 @@ export async function synchronizeProposalItemsInTransaction(
       created = true;
     }
     const previousQuantity = before.quantity;
-    if (before.quantity !== data.quantity) await recalculateQuantity(tx, {...before,number}, data.quantity, actor, operationRootId);
+    const quantityRootId = !operationRootId && before.quantity !== data.quantity ? randomUUID() : undefined;
+    if (before.quantity !== data.quantity) await recalculateQuantity(tx, {...before,number}, data.quantity, actor, quantityRootId ?? operationRootId);
     const desiredSnapshot = { ...data, deletedAt: null };
     const commercialChanged = canonicalProposalJson(commercialSnapshot(before)) !== canonicalProposalJson({
       number: desiredSnapshot.number, suffixInt: desiredSnapshot.suffixInt, title: desiredSnapshot.title,
@@ -165,7 +171,7 @@ export async function synchronizeProposalItemsInTransaction(
     const after = commercialChanged || (needsRenumber && retained.has(before.id))
       ? await tx.product.update({ where: { id: before.id }, data }) : before;
     if (created || commercialChanged) {
-      await auditProductSync(tx, actor, proposal.id, before, after, operationRootId);
+      await auditProductSync(tx, actor, proposal.id, before, after, quantityRootId, operationRootId);
       previousNumbers.set(before.id, before.number);
       changed = true;
     }

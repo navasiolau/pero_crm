@@ -1,3 +1,5 @@
+import { cardFieldRevision, fieldCommand } from '@/server/changelog/field-reversal';
+import { projectFieldKind, projectServiceState } from '@/server/projects/field-reversal-data';
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { Prisma } from "@prisma/client";
 import { hasAnyRole, MANAGER_ROLES } from "../../lib/roles";
@@ -14,9 +16,9 @@ export async function applyProjectionInTransaction(tx: PricingTransaction, conte
   if (!hasAnyRole(context.actor.roles, MANAGER_ROLES)) throw Error("Недостаточно прав для сохранения цен КП");
   const rows = await tx.$queryRaw<{ id: string; stage: string; currency: string; initialPrice: Prisma.Decimal | null;
     servicesTotal: Prisma.Decimal | null; delivery: Prisma.Decimal | null; unloading: Prisma.Decimal | null;
-    installation: Prisma.Decimal | null; proposalRoundingAdjustment: Prisma.Decimal }[]>`
+    installation: Prisma.Decimal | null; proposalRoundingAdjustment: Prisma.Decimal; fieldRevisions: Prisma.JsonValue }[]>`
     SELECT p.id, p.stage, p.currency, p."initialPrice", p."servicesTotal", p.delivery, p.unloading,
-      p.installation, p."proposalRoundingAdjustment"
+      p.installation, p."proposalRoundingAdjustment", p."fieldRevisions"
     FROM "Project" p JOIN "CommercialProposal" cp ON cp."projectId" = p.id
     WHERE p.id = ${context.project.id} AND cp.id = ${context.proposalId}
       AND p."deletedAt" IS NULL AND cp."deletedAt" IS NULL
@@ -25,7 +27,7 @@ export async function applyProjectionInTransaction(tx: PricingTransaction, conte
   if (rows.length !== 1 || !project || project.stage !== "LEAD" || context.project.stage !== "LEAD") throw Error("Цены КП можно сохранить только в связанном проекте «Лид»");
   if (project.currency !== "BYN" || projection.project.currency !== "BYN") throw Error("Коммерческие цены CRM должны быть в BYN");
   const products = await tx.product.findMany({ where: { projectId: project.id, deletedAt: null },
-    select: { id: true, number: true, quantity: true, initialPrice: true, expectedPrice: true, initialPriceCaptureEligible: true } });
+    select: { id: true, number: true, quantity: true, initialPrice: true, expectedPrice: true, initialPriceCaptureEligible: true, fieldRevisions: true } });
   const links = new Map(context.items.map(item => [item.id, item.productId]));
   if (links.size !== context.items.length || projection.items.length !== links.size || products.length !== links.size ||
     new Set(context.items.map(item => item.productId)).size !== links.size || new Set(projection.items.map(item => item.id)).size !== links.size) throw Error("Состав КП изменился — повторите сохранение");
@@ -42,6 +44,17 @@ export async function applyProjectionInTransaction(tx: PricingTransaction, conte
     const product=byId.get(productId)!;
     const before=businessSnapshot(product,['initialPrice','expectedPrice','initialPriceCaptureEligible']);
     const after={initialPrice:item.initialPrice.toString(),expectedPrice:item.expectedPrice.toString(),initialPriceCaptureEligible:false};
+    if (!context.operationRootId && product.fieldRevisions && product.expectedPrice?.toString() !== after.expectedPrice) {
+      const version = (await tx.product.findUniqueOrThrow({ where: { id: productId }, select: { fieldRevisions: true } })).fieldRevisions;
+      const reversal = fieldCommand("product.expectedPrice",
+        { value: product.expectedPrice?.toString() ?? null, revision: cardFieldRevision(product.fieldRevisions, "expectedPrice") },
+        { value: after.expectedPrice, revision: cardFieldRevision(version, "expectedPrice") });
+      if (reversal) await writeChangeLogInTransaction(tx, {
+        actorType: "user", actorId: context.actor.id, actorName: context.actor.name, source: context.actor.source,
+        entity: "product", entityId: productId, action: "update", field: "expectedPrice", reversal,
+        oldValue: reversal.data.previous, newValue: reversal.data.expected,
+      }, { ...productJournalContext(product), ...automationJournalContext(context.actor, "Обновление цены изделия из КП") });
+    }
     if(JSON.stringify(before)!==JSON.stringify(after))await writeChangeLogInTransaction(tx,
       {actorType:'user',actorId:context.actor.id,actorName:context.actor.name,source:context.actor.source,operationRootId:context.operationRootId,entity:'product',entityId:productId,action:'proposal.pricing.sync',
         oldValue:before,newValue:{...after,proposalId:context.proposalId}},
@@ -49,10 +62,23 @@ export async function applyProjectionInTransaction(tx: PricingTransaction, conte
   }
   const updated = await tx.project.updateMany({ where: { id: project.id, stage: "LEAD", deletedAt: null }, data: projection.project });
   if (updated.count !== 1) throw Error("Этап проекта изменился во время сохранения КП");
+  if (!context.operationRootId && project.fieldRevisions) {
+    const before = projectServiceState(project);
+    if (JSON.stringify(before.value) !== JSON.stringify(projectServiceState({ ...project, ...projection.project }).value)) {
+      const after = projectServiceState(await tx.project.findUniqueOrThrow({ where: { id: project.id } }));
+      const reversal = fieldCommand(projectFieldKind("services"), before, after);
+      if (reversal) await writeChangeLogInTransaction(tx, {
+        actorType: "user", actorId: context.actor.id, actorName: context.actor.name, source: context.actor.source,
+        entity: "project", entityId: project.id, action: "update", field: "services", reversal,
+        oldValue: before.value, newValue: after.value,
+      }, { ...projectJournalContext(context.project), ...automationJournalContext(context.actor, "Обновление услуг из КП") });
+    }
+  }
+  const { fieldRevisions: _versions, ...rawProject } = project;
   const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
   await writeChangeLogInTransaction(tx, { actorType: "user", actorId: context.actor.id, actorName: context.actor.name,
     source: context.actor.source, operationRootId: context.operationRootId, entity: "project", entityId: project.id, action: "proposal.pricing.sync",
-    oldValue: json({ project, products:products.map(product=>businessSnapshot(product,['id','quantity','initialPrice','expectedPrice','initialPriceCaptureEligible'])) }), newValue: json({ proposalId: context.proposalId, project: projection.project, items: projection.items,
+    oldValue: json({ project: rawProject, products:products.map(product=>businessSnapshot(product,['id','quantity','initialPrice','expectedPrice','initialPriceCaptureEligible'])) }), newValue: json({ proposalId: context.proposalId, project: projection.project, items: projection.items,
       rate: { ...projection.rate, value: projection.rate.value.toString() } }) },
     {...projectJournalContext(context.project),...automationJournalContext(context.actor,'Обновление стоимости проекта из КП'),
       before:businessSnapshot(project,Object.keys(projection.project)),after:json(projection.project),

@@ -1,3 +1,4 @@
+import { projectFieldCommand } from '@/server/projects/field-reversal-data';
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import type { CommercialProposal, Prisma, Project } from "@prisma/client";
 import { proposalCreationReversal } from "./proposal-create-reversal";
@@ -207,7 +208,15 @@ export async function saveProposalInTransaction(tx: Prisma.TransactionClient, ac
   const state = canonicalState(bindProposalClient(source, selection.client, selection.isTemporary), { ...project, ...values });
   const projectChanged = project.title !== values.title || project.address !== values.address || project.clientId !== selection.client.id;
   if (projectChanged) {
-    await tx.project.update({ where: { id: project.id }, data: { ...values, clientId: selection.client.id } });
+    const after = await tx.project.update({ where: { id: project.id }, data: { ...values, clientId: selection.client.id } });
+    for (const field of ["title", "address", "contactBinding"] as const) {
+      const reversal = projectFieldCommand(field, project, after);
+      if (reversal) await writeChangeLogInTransaction(tx, {
+        actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
+        entity: "project", entityId: project.id, action: "update", field: field === "contactBinding" ? "clientId" : field,
+        reversal, oldValue: reversal.data.previous, newValue: reversal.data.expected,
+      }, { ...projectJournalContext(project), ...automationJournalContext(actor, "Обновление проекта из КП") });
+    }
     await writeChangeLogInTransaction(tx, {
       actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
       entity: "project", entityId: project.id, action: "kp.synchronize", operationRootId,
