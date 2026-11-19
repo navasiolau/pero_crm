@@ -73,7 +73,7 @@ test("preflight IO is UNKNOWN while typed changed-payload and deleted receipt re
 test("DI actual project-material wrappers keep mandatory audits atomic and isolate cache faults", async () => {
   let line: Row | null = null, audit: Row[] = [], auditFails = false;
   const product = { id: "product", projectId: "project", number: "P", quantity: 1 };
-  const db = { changeLog: { create: async ({ data }: { data: Row }) => { if (auditFails) throw Error("audit failure"); audit.push(data); return data; } },
+  const db = { $queryRaw: async () => [], changeLog: { create: async ({ data }: { data: Row }) => { if (auditFails) throw Error("audit failure"); audit.push(data); return data; } },
     projectMaterial: { findUnique: async () => line ? { ...line, material: { name: "QA material" }, product } : null,
       delete: async () => { const previous = line; line = null; return previous; } } };
   inject("../src/server/require-role", { requireRole: async () => ({ user: { id: "manager", name: "QA", roles: ["MANAGER"] } }) });
@@ -81,7 +81,8 @@ test("DI actual project-material wrappers keep mandatory audits atomic and isola
   inject("../src/server/warehouse/norm-core", {
     lockMaterialProduct: async () => {},
     addMaterialNorm: async () => { line = { id: "line", productId: "product", quantity: "2.000", quantityPerUnit: "2.000", issuedQty: "0" }; return { line, product, material: { name: "QA material" } }; },
-    updateMaterialNorm: async () => { const previous = { ...line, product, material: { name: "QA material" } }; line = { ...line, quantity: "3.000", quantityPerUnit: "3.000" }; return { line: previous, quantity: "3.000", quantityPerUnit: "3.000" }; },
+    updateMaterialNorm: async () => { const previous = { ...line, product, material: { name: "QA material" } }; line = { ...line, quantity: "3.000", quantityPerUnit: "3.000" }; return { line: previous, updated: line, quantity: "3.000", quantityPerUnit: "3.000" }; },
+    deleteMaterialNorm: async () => { const previous = { ...line, product, material: { name: "QA material" } }; const deletedAt = new Date(); line = { ...line, deletedAt }; return { line: previous, after: line, deletedAt }; },
   });
   const { addProjectMaterial, updateProjectMaterial, deleteProjectMaterial } = require("../src/server/warehouse/actions") as typeof import("../src/server/warehouse/actions");
   const operations = [() => addProjectMaterial({ productId: "product", materialId: "material", quantity: 2 }),

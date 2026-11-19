@@ -7,10 +7,10 @@ import { readIssuedQuantity } from "./issued-quantity";
 
 export async function lockMaterialProduct(tx: Prisma.TransactionClient, id: string, actor: VisibilityActor) {
   await warehouseMetadataGate(tx);
-  const line = await tx.projectMaterial.findUnique({ where: {product:productVisibilityWhere(actor), id }, select: { productId: true } });
+  const line = await tx.projectMaterial.findUnique({ where: {product:productVisibilityWhere(actor), id, deletedAt: null }, select: { productId: true } });
   if (!line) throw new Error("Строка потребности не найдена");
   await lockProductRow(tx, line.productId);
-  if (!await tx.projectMaterial.findUnique({ where: { id, product: productVisibilityWhere(actor) }, select: { id: true } }))
+  if (!await tx.projectMaterial.findUnique({ where: { id, deletedAt: null, product: productVisibilityWhere(actor) }, select: { id: true } }))
     throw new Error("Строка потребности не найдена");
 }
 
@@ -24,7 +24,8 @@ export async function addMaterialNorm(tx: Prisma.TransactionClient,
   const material = await tx.material.findUnique({ where: { id: data.materialId } });
   if (!material?.active) throw new Error("Материал не найден");
   const norm = inputNorm(data, product.quantity, 3, 12);
-  const previous = await tx.projectMaterial.findUnique({ where: {product:productVisibilityWhere(actor), productId_materialId: { productId: product.id, materialId: material.id } } });
+  const stored = await tx.projectMaterial.findUnique({ where: {product:productVisibilityWhere(actor), productId_materialId: { productId: product.id, materialId: material.id } } });
+  const previous = stored?.deletedAt ? null : stored;
   const atoms = decimalAtoms(norm, 3, 12) + (previous ? decimalAtoms(existingNorm(previous.quantityPerUnit, previous.quantity, product.quantity), 3, 12) : BigInt(0));
   const quantityPerUnit = decimalText(atoms, 3);
   const quantity = scaleNorm(quantityPerUnit, product.quantity, 3, 12);
@@ -33,20 +34,33 @@ export async function addMaterialNorm(tx: Prisma.TransactionClient,
     where: { productId_materialId: { productId: product.id, materialId: material.id } },
     create: { productId: product.id, materialId: material.id, quantity, quantityPerUnit, issuedQty,
       comment: data.comment?.trim() || null, createdById: actor.id },
-    update: { quantity, quantityPerUnit },
+    update: { quantity, quantityPerUnit, ...(stored?.deletedAt && {
+      deletedAt: null, deletedById: null, issuedQty, comment: data.comment?.trim() || null,
+    }) },
   });
-  return { line, product, material, previous };
+  return { line, product, material, previous: stored };
+}
+
+export async function deleteMaterialNorm(tx: Prisma.TransactionClient, id: string, actor: VisibilityActor) {
+  await lockMaterialProduct(tx, id, actor);
+  const line = await tx.projectMaterial.findUnique({ where: { id, deletedAt: null, product: productVisibilityWhere(actor) },
+    include: { material: { select: { name: true } }, product: { select: { projectId: true, number: true } } } });
+  if (!line) throw Error("Строка не найдена");
+  if (line.issuedQty.gt(0)) throw Error("По строке уже есть выдача со склада — сначала верните материал");
+  const deletedAt = new Date();
+  const after = await tx.projectMaterial.update({ where: { id }, data: { deletedAt, deletedById: actor.id } });
+  return { line, after, deletedAt };
 }
 
 export async function updateMaterialNorm(tx: Prisma.TransactionClient,
   data: { id: string; quantity?: number; quantityPerUnit?: number; comment?: string }, actor: VisibilityActor) {
   await lockMaterialProduct(tx, data.id, actor);
-  const line = await tx.projectMaterial.findUnique({ where: {product:productVisibilityWhere(actor), id: data.id }, include: { product: { select: { id: true, number: true, projectId: true, quantity: true } }, material: { select: { name: true } } } });
+  const line = await tx.projectMaterial.findUnique({ where: {product:productVisibilityWhere(actor), id: data.id, deletedAt: null }, include: { product: { select: { id: true, number: true, projectId: true, quantity: true } }, material: { select: { name: true } } } });
   if (!line) throw new Error("Строка не найдена");
   const quantityPerUnit = inputNorm(data, line.product.quantity, 3, 12);
   const quantity = scaleNorm(quantityPerUnit, line.product.quantity, 3, 12);
   if (decimalAtoms(quantity, 3, 12) < decimalAtoms(materialPlanFloor(line.quantity, line.issuedQty), 3, 12))
     throw new Error(`Нельзя поставить меньше уже выданного по текущему плану (${materialPlanFloor(line.quantity,line.issuedQty)})`);
-  await tx.projectMaterial.update({ where: { id: line.id }, data: { quantity, quantityPerUnit, comment: data.comment?.trim() || null } });
-  return { line, quantity, quantityPerUnit };
+  const updated = await tx.projectMaterial.update({ where: { id: line.id }, data: { quantity, quantityPerUnit, comment: data.comment?.trim() || null } });
+  return { line, updated, quantity, quantityPerUnit };
 }

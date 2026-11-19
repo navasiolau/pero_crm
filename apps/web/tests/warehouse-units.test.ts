@@ -17,14 +17,15 @@ test("warehouse unit settings grant ADMIN exclusively, including nested and trai
 });
 
 // Источник: warehouse-category-schema.test.ts
-test('generated MaterialCategory default scalar fields match the historical warehouse table', () => {
+test('generated MaterialCategory keeps historical fields and declares a migrated catalog revision', () => {
   const model = Prisma.dmmf.datamodel.models.find(({ name }) => name === 'MaterialCategory');
   assert.ok(model);
   const historicalSql = readFileSync('prisma/migrations/20260720153036_warehouse/migration.sql', 'utf8');
   const table = historicalSql.match(/CREATE TABLE "MaterialCategory" \(([\s\S]*?)\n\);/)?.[1];
   assert.ok(table);
   const historicalFields = [...table.matchAll(/^\s+"(\w+)"\s+/gm)].map(([, name]) => name);
-  assert.deepEqual(model.fields.filter(({ kind }) => kind === 'scalar').map(({ name }) => name), historicalFields);
+  assert.deepEqual(model.fields.filter(({ kind }) => kind === 'scalar').map(({ name }) => name), [...historicalFields, 'warehouseCatalogRevision']);
+  assert.match(readFileSync('prisma/migrations/20261120001600_reversible_warehouse_catalog/migration.sql', 'utf8'), /ALTER TABLE "MaterialCategory" ADD COLUMN "warehouseCatalogRevision" INTEGER NOT NULL DEFAULT 0/);
   assert.equal(model.fields.some(({ name }) => name === 'revision'), false);
   assert.equal(model.fields.find(({ name }) => name === 'active')?.default, true);
   assert.equal(model.fields.find(({ name }) => name === 'materials')?.kind, 'object');

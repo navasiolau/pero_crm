@@ -18,7 +18,7 @@ export async function recalculateQuantity(tx: Prisma.TransactionClient, product:
   await tx.$queryRaw`SELECT id FROM "ProjectMaterial" WHERE "productId" = ${product.id} ORDER BY id FOR UPDATE`;
   const works = await tx.work.findMany({ where: { productId: product.id },
     include: { tasks: { select: { quantity: true, allocationGroupId: true } } } });
-  const materials = await tx.projectMaterial.findMany({ where: { productId: product.id }, include: { material: { select: { name: true } } } });
+  const materials = await tx.projectMaterial.findMany({ where: { productId: product.id, deletedAt: null }, include: { material: { select: { name: true } } } });
   const plan = planQuantityChange(product.quantity, count, works, materials);
   const context=productJournalContext(product);
   const system=automationJournalContext(actor,`Пересчёт плана при изменении количества изделия: ${product.quantity} → ${count}`);

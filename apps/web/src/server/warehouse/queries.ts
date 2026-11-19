@@ -48,7 +48,7 @@ async function stockByMaterial(
 async function debtByMaterial(actor: VisibilityActor): Promise<Map<string, number>> {
   actor = await resolveVisibilityActor(prisma, actor);
   const lines = await prisma.projectMaterial.findMany({
-    where: { product: productVisibilityWhere(actor) },
+    where: { deletedAt: null, product: productVisibilityWhere(actor) },
     select: { materialId: true, quantity: true, issuedQty: true },
   });
   const debt = new Map<string, number>();
@@ -195,7 +195,7 @@ export async function getProjectMaterialsBatch(productIds:readonly string[],acto
  const uniqueIds=[...new Set(productIds)],visibleProduct=productVisibilityWhere(actor);
  const [allRows,allMovements]=await Promise.all([
   database.projectMaterial.findMany({
-   where:{productId:{in:uniqueIds},product:visibleProduct},orderBy:{createdAt:"asc"},
+   where:{deletedAt:null,productId:{in:uniqueIds},product:visibleProduct},orderBy:{createdAt:"asc"},
    include:{material:{select:{id:true,name:true,sku:true,measurementUnit:{select:{name:true}},purchasePrice:true}}},
   }),
   loadBatchMovements(uniqueIds,actor,database),
@@ -294,7 +294,7 @@ export async function listProductShortages(
   if(!hasAnyRole(actor.roles,[...OFFICE_ROLES,...FIELD_ROLES]))throw new Error("Недостаточно прав");
   actor = await resolveVisibilityActor(prisma, actor);
   const lines = await prisma.projectMaterial.findMany({
-    where: { productId: { in: productIds }, product: productVisibilityWhere(actor) },
+    where: { deletedAt: null, productId: { in: productIds }, product: productVisibilityWhere(actor) },
     select: {
       productId: true,
       materialId: true,
@@ -326,7 +326,7 @@ export async function listProjectShortages(
   if(!hasAnyRole(actor.roles,[...OFFICE_ROLES,...FIELD_ROLES]))throw new Error("Недостаточно прав");
   actor = await resolveVisibilityActor(prisma, actor);
   const lines = await prisma.projectMaterial.findMany({
-    where: { product: { AND: [{ projectId: { in: projectIds } }, productVisibilityWhere(actor)] } },
+    where: { deletedAt: null, product: { AND: [{ projectId: { in: projectIds } }, productVisibilityWhere(actor)] } },
     select: {
       materialId: true,
       quantity: true,

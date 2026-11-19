@@ -1,7 +1,6 @@
 "use server";
 
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
-import { productVisibilityWhere } from "@/server/access/visibility";
 
 
 import { z } from "zod";
@@ -14,7 +13,7 @@ import { journalProductContext, materialJournalSnapshot } from "@/server/finance
 
 import { revalidateWarehouse } from "./revalidate";
 import { withTaskTransaction } from "@/server/tasks/transaction";
-import { addMaterialNorm, updateMaterialNorm, lockMaterialProduct } from "./norm-core";
+import { addMaterialNorm, updateMaterialNorm, deleteMaterialNorm } from "./norm-core";
 import { stockInventoryReceiptSchema, stockIssueSchema, stockReturnSchema } from "./contracts";
 import { withWarehouseWrite } from "./accounting";
 import { createStockMovementCore } from "./movement-service";
@@ -22,6 +21,7 @@ import {MANAGER_ROLES,WAREHOUSE_MANAGE_ROLES} from "@/lib/roles";
 import { requireRole } from "@/server/require-role";
 import { materialSchema, type MaterialInput, type MaterialCreateResult } from "./material-contracts";
 import { createMaterialInTransaction, requireMaterialUnit, materialCatalogError } from "./material-core";
+import { catalogCommand, categorySnapshot } from "./catalog-reversal-contract";
 
 // Склад (§12, фаза 6). Правки — админ/директор/менеджер; просмотр — офисные
 // роли (разграничение на страницах). Цены — BYN; EXPENSE/RETURN несут
@@ -58,12 +58,36 @@ export async function addMaterialCategory(
     entity: "materialCategory",
     entityId: category.id,
     action: "create",
+    reversal: await catalogCommand(tx, { entity: "materialCategory", before: null, after: category }),
     newValue: { name: category.name },
   }, { entity: { label: `Категория материалов ${category.name}` }, contexts: [], before: null,
     after: { name: category.name, comment: category.comment, active: category.active } });
   });
   await revalidateWarehouse();
   return { ok: true };
+}
+
+export async function updateMaterialCategory(id: string, input: z.input<typeof categorySchema>) {
+  const session = await requireRole(WAREHOUSE_MANAGE_ROLES);
+  const parsed = categorySchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
+  const result = await withWarehouseWrite(async tx => {
+    await tx.$queryRaw`SELECT id FROM "MaterialCategory" WHERE id=${id} FOR UPDATE`;
+    const before = await tx.materialCategory.findUnique({ where: { id } });
+    if (!before) return { ok: false as const, error: "Категория не найдена" };
+    const data = { name: parsed.data.name, comment: parsed.data.comment?.trim() || null };
+    if (data.name === before.name && data.comment === before.comment) return { ok: true as const };
+    const after = await tx.materialCategory.update({ where: { id }, data });
+    await writeChangeLogInTransaction(tx, {
+      actorType: "user", actorId: session.user.id, actorName: session.user.name,
+      entity: "materialCategory", entityId: id, action: "update",
+      oldValue: categorySnapshot(before), newValue: categorySnapshot(after),
+      reversal: await catalogCommand(tx, { entity: "materialCategory", before, after }),
+    }, { entity: { label: `Категория материалов ${after.name}` }, contexts: [] });
+    return { ok: true as const };
+  });
+  if (result.ok) await revalidateWarehouse();
+  return result;
 }
 
 export async function toggleMaterialCategory(
@@ -74,7 +98,7 @@ export async function toggleMaterialCategory(
   await tx.$queryRaw`SELECT id FROM "MaterialCategory" WHERE id=${id} FOR UPDATE`;
   const category = await tx.materialCategory.findUnique({ where: { id } });
   if (!category) return { ok: false as const, error: "Категория не найдена" };
-  await tx.materialCategory.update({
+  const after = await tx.materialCategory.update({
     where: { id },
     data: { active: !category.active },
   });
@@ -85,6 +109,7 @@ export async function toggleMaterialCategory(
     entity: "materialCategory",
     entityId: id,
     action: "update",
+    reversal: await catalogCommand(tx, { entity: "materialCategory", before: category, after }),
     field: "active",
     oldValue: category.active,
     newValue: !category.active,
@@ -118,12 +143,20 @@ export async function updateMaterial(id: string, input: z.input<typeof materialS
       const material = await tx.material.findUnique({ where: { id }, include: { measurementUnit: { select: { name: true } }, category: { select: { name: true } } } });
       if (!material) return { ok: false as const, error: "Материал не найден" };
       await requireMaterialUnit(tx, data.unitId);
+      if (data.categoryId && data.categoryId !== material.categoryId) {
+        await tx.$queryRaw`SELECT id FROM "MaterialCategory" WHERE id=${data.categoryId} FOR SHARE`;
+        if (!await tx.materialCategory.findUnique({ where: { id: data.categoryId, active: true }, select: { id: true } }))
+          return { ok: false as const, error: "Категория материалов больше недоступна" };
+      }
       const updated = await tx.material.update({ where: { id }, data: {
         name: data.name, sku: data.sku?.trim() || null, unitId: data.unitId,
         categoryId: data.categoryId || null, minStock: data.minStock ?? null, comment: data.comment?.trim() || null,
       }, include: { measurementUnit: { select: { name: true } }, category: { select: { name: true } } } });
       await writeChangeLogInTransaction(tx, { actorType: "user", actorId: session.user.id, actorName: session.user.name ?? undefined,
         entity: "material", entityId: id, action: "update",
+        ...(material.warehouseCatalogRevision !== updated.warehouseCatalogRevision && {
+          reversal: await catalogCommand(tx, { entity: "material", before: material, after: updated }),
+        }),
         oldValue: { name: material.name, sku: material.sku, unitId: material.unitId, unit: material.measurementUnit.name },
         newValue: { name: updated.name, sku: updated.sku, unitId: updated.unitId, unit: updated.measurementUnit.name },
       }, { entity: { label: `Материал ${updated.name}`, href: "/warehouse/materials" }, contexts: [],
@@ -148,7 +181,7 @@ export async function toggleMaterial(
   await tx.$queryRaw`SELECT id FROM "Material" WHERE id=${id} FOR UPDATE`;
   const material = await tx.material.findUnique({ where: { id } });
   if (!material) return { ok: false as const, error: "Материал не найден" };
-  await tx.material.update({
+  const after = await tx.material.update({
     where: { id },
     data: { active: !material.active },
   });
@@ -159,6 +192,7 @@ export async function toggleMaterial(
     entity: "material",
     entityId: id,
     action: "update",
+    reversal: await catalogCommand(tx, { entity: "material", before: material, after }),
     field: "active",
     oldValue: material.active,
     newValue: !material.active,
@@ -208,7 +242,8 @@ export async function addProjectMaterial(
     actorName: session.user.name ?? undefined,
     entity: "projectMaterial",
     entityId: line.id,
-    action: previous ? "update" : "create",
+    action: previous && !previous.deletedAt ? "update" : "create",
+    reversal: await catalogCommand(tx, { entity: "projectMaterial", before: previous, after: line }),
     newValue: {
       product: product.number,
       material: material.name,
@@ -245,7 +280,7 @@ export async function updateProjectMaterial(
   let mutation;
   try { mutation = await withTaskTransaction(async tx => {
     const result = await updateMaterialNorm(tx, parsed.data, session.user);
-    const { line, quantity, quantityPerUnit } = result;
+    const { line, updated, quantity, quantityPerUnit } = result;
   await writeChangeLogInTransaction(tx, {
     actorType: "user", source: "web",
     actorId: session.user.id,
@@ -253,6 +288,9 @@ export async function updateProjectMaterial(
     entity: "projectMaterial",
     entityId: line.id,
     action: "update",
+    ...(line.warehouseCatalogRevision !== updated.warehouseCatalogRevision && {
+      reversal: await catalogCommand(tx, { entity: "projectMaterial", before: line, after: updated }),
+    }),
     field: "quantity",
     oldValue: Number(line.quantity),
     newValue: { quantity, quantityPerUnit },
@@ -275,13 +313,7 @@ export async function deleteProjectMaterial(
   let line;
   try {
     line = await withTaskTransaction(async (tx) => {
-      await lockMaterialProduct(tx, id, session.user);
-      const line = await tx.projectMaterial.findUnique({ where: {product:productVisibilityWhere(session.user), id }, include: {
-        material: { select: { name: true } }, product: { select: { projectId: true, number: true } },
-      } });
-      if (!line) throw new Error("Строка не найдена");
-      if (Number(line.issuedQty) > 0) throw new Error("По строке уже есть выдача со склада — сначала верните материал");
-      await tx.projectMaterial.delete({ where: { id } });
+      const { line, after, deletedAt } = await deleteMaterialNorm(tx, id, session.user);
   await writeChangeLogInTransaction(tx, {
     actorType: "user", source: "web",
     actorId: session.user.id,
@@ -289,12 +321,13 @@ export async function deleteProjectMaterial(
     entity: "projectMaterial",
     entityId: id,
     action: "delete",
+    reversal: await catalogCommand(tx, { entity: "projectMaterial", before: line, after }),
     oldValue: {
       material: line.material.name,
       quantity: Number(line.quantity),
     },
   }, {entity:{label:`Потребность ${line.product.number}: ${line.material.name}`},contexts:[journalProductContext({id:line.productId,number:line.product.number})],
-    before:{materialId:line.materialId,material:line.material.name,quantity:line.quantity.toString(),quantityPerUnit:line.quantityPerUnit?.toString()??null,issuedQty:line.issuedQty.toString(),comment:line.comment},after:null});
+    before:{materialId:line.materialId,material:line.material.name,quantity:line.quantity.toString(),quantityPerUnit:line.quantityPerUnit?.toString()??null,issuedQty:line.issuedQty.toString(),comment:line.comment},after:{deletedAt}});
       return line;
     });
   } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Не удалось удалить потребность" }; }

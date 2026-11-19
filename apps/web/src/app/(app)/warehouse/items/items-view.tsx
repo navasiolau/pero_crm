@@ -23,6 +23,7 @@ import {
   addMaterialCategory,
   toggleMaterial,
   toggleMaterialCategory,
+  updateMaterialCategory,
 } from "@/server/warehouse/actions";
 import type {
   MaterialCategoryView,
@@ -50,6 +51,9 @@ export function ItemsView({
   const [viewing, setViewing] = useState<MaterialView | null>(null);
   const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [categoryName, setCategoryName] = useState("");
+  const [categoryComment, setCategoryComment] = useState("");
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  function resetCategory() { setEditingCategoryId(null); setCategoryName(""); setCategoryComment(""); }
   const createButton = useRef<HTMLButtonElement>(null);
 
   function openCreate() { setEditing(null); setEditOpen(true); }
@@ -314,7 +318,7 @@ export function ItemsView({
       <MaterialDialog open={editOpen} onOpenChange={setEditOpen} units={units} categories={categories} editing={editing} showAccountingPrice returnFocus={createButton} />
 
       {/* Категории материалов */}
-      <Dialog open={categoriesOpen} onOpenChange={setCategoriesOpen}>
+      <Dialog open={categoriesOpen} onOpenChange={open => { setCategoriesOpen(open); if (!open) resetCategory(); }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Категории</DialogTitle>
@@ -336,6 +340,11 @@ export function ItemsView({
                 >
                   {category.name}
                 </span>
+                <div className="flex shrink-0 items-center gap-1">
+                <Button variant="ghost" size="icon" aria-label={`Редактировать категорию ${category.name}`} disabled={pending}
+                  onClick={() => { setEditingCategoryId(category.id); setCategoryName(category.name); setCategoryComment(category.comment ?? ""); }}>
+                  <Pencil className="size-4" />
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -362,6 +371,7 @@ export function ItemsView({
                 >
                   <Power className="size-4 text-muted-foreground" />
                 </Button>
+                </div>
               </div>
             ))}
             {categories.length === 0 ? (
@@ -370,30 +380,35 @@ export function ItemsView({
               </div>
             ) : null}
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2">
             <Input
+              aria-label="Название категории"
               value={categoryName}
               onChange={(event) => setCategoryName(event.target.value)}
-              placeholder="Новая категория…"
+              placeholder="Название категории…"
             />
+            <Input aria-label="Комментарий к категории" placeholder="Комментарий" value={categoryComment}
+              onChange={event => setCategoryComment(event.target.value)} />
+            <div className="flex flex-wrap justify-end gap-2">
+            {editingCategoryId && <Button variant="ghost" disabled={pending} onClick={resetCategory}>Отменить</Button>}
             <Button
               disabled={pending || categoryName.trim() === ""}
               onClick={() =>
                 startTransition(async () => {
-                  const result = await addMaterialCategory({
-                    name: categoryName.trim(),
-                  });
+                  const data = { name: categoryName.trim(), comment: categoryComment };
+                  const result = editingCategoryId ? await updateMaterialCategory(editingCategoryId, data) : await addMaterialCategory(data);
                   if (result.ok) {
-                    toast.success("Категория создана");
-                    setCategoryName("");
+                    toast.success(editingCategoryId ? "Категория изменена" : "Категория создана");
+                    resetCategory();
                   } else {
                     toast.error(result.error ?? "Ошибка");
                   }
                 })
               }
             >
-              Добавить
+              {editingCategoryId ? "Сохранить категорию" : "Добавить"}
             </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
