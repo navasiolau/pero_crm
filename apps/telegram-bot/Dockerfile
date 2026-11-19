@@ -21,6 +21,7 @@ RUN pnpm --filter @pero/telegram-bot build
 FROM base AS runtime
 ENV NODE_ENV=production
 # dist не имеет внешних зависимостей — node_modules в образ не попадают
+RUN install -d -o node -g node -m 0700 /app/.finance-state
 USER node
 CMD ["node", "dist/index.js"]
 

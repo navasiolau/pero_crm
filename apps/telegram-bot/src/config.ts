@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { isIP } from "node:net";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // Минимальная загрузка .env (zero-dep): cwd → каталог пакета. В docker
@@ -94,5 +95,6 @@ export const config = {
     process.env.TELEGRAM_API_ORIGIN,
     recoveryTest,
   ),
+  financeStateDir: process.env.BOT_FINANCE_STATE_DIR ?? (recoveryTest ? join(tmpdir(), `pero-bot-test-${process.pid}`) : join(__dirname, "../.finance-state")),
   healthFile: process.env.BOT_HEALTH_FILE ?? "/tmp/pero-telegram-bot-health.json",
 };

@@ -13,7 +13,7 @@ import { confirmTelegramLinkInTransaction } from "@/server/telegram/mutation-cor
 // Scope: write.
 const schema = z.object({
   code: z.string().min(1),
-  chatId: z.string().min(1).max(64),
+  chatId: z.string().regex(/^[1-9]\d{0,15}$/),
   username: z.string().max(64).optional(),
 });
 

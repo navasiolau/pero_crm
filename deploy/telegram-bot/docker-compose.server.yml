@@ -6,6 +6,10 @@ services:
     image: ghcr.io/navasiolau/pero_telegram_bot:${BOT_IMAGE_TAG:-main}
     container_name: tgbot
     env_file: .env
+    environment:
+      BOT_FINANCE_STATE_DIR: /app/.finance-state
+    volumes:
+      - finance-state:/app/.finance-state
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "try{const h=JSON.parse(require('fs').readFileSync('/tmp/pero-telegram-bot-health.json','utf8'));const fresh=x=>{const a=Date.now()-Date.parse(x);return Number.isFinite(a)&&a>=0&&a<=90000};if(h.schemaVersion!==1||h.service!=='telegram-bot'||h.status!=='healthy'||!fresh(h.generatedAt)||!['polling','crm'].every(k=>h[k].failureReason===null&&fresh(h[k].lastSuccessAt)))process.exit(1)}catch{process.exit(1)}"]
@@ -18,3 +22,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  finance-state:
