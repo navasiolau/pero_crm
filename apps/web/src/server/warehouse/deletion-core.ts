@@ -11,10 +11,11 @@ import {planWarehouseDeletion,type DeletionFact} from './deletion-plan';
 import {movementDeletionSchema,type MovementDeletionInput,type MovementDeletionPreview} from './deletion-contracts';
 import {writeChangeLogInTransaction} from '@/server/changelog/writer';
 import {journalAutomatic,journalProductContext,paymentJournalSnapshot} from '@/server/finance/journal';
+import {warehouseMovementCommand, warehouseRestorationSnapshot, type WarehouseMovementReversal} from './movement-reversal-contract';
 
 type Tx=Prisma.TransactionClient;
 const incomplete=()=>Error('Недостаточно данных для безопасной отмены: движение не входит в проверяемый текущий учёт');
-async function requireAdministrator(tx:Tx,actor:DomainActor){
+export async function requireWarehouseDeleteActor(tx:Tx,actor:DomainActor){
   if(!hasAnyRole(actor.roles,WAREHOUSE_DELETE_ROLES))throw Error('Удалять движения может только администратор');
   const current=await tx.user.findUnique({where:{id:actor.id},select:{roles:true,active:true}});
   if(!current?.active||!hasAnyRole(current.roles,WAREHOUSE_DELETE_ROLES))throw Error('Удалять движения может только администратор');
@@ -22,7 +23,7 @@ async function requireAdministrator(tx:Tx,actor:DomainActor){
 
 /** Вызывается под общей денежной блокировкой; затем берёт те же locks, что обычное движение. */
 async function loadPlan(tx:Tx,actor:DomainActor,movementId:string){
-  await requireAdministrator(tx,actor);
+  await requireWarehouseDeleteActor(tx,actor);
   const state=await warehouseWriteGate(tx);
   const root=await tx.stockMovement.findUnique({where:{id:movementId},include:{warehouseValuation:true}});
   if(!root||root.deletionId)throw Error('Движение не найдено или уже удалено');
@@ -45,10 +46,10 @@ async function loadPlan(tx:Tx,actor:DomainActor,movementId:string){
   const facts:DeletionFact[]=rows.map(row=>{
     if(!row.quantity.eq(row.movement.quantity)||!row.moneyByn.eq(row.movement.totalByn??-1)||
       (row.accountingRevision!==null&&row.accountingRevision>balance.revision))throw incomplete();
-    return {id:row.movementId,type:row.movement.type,quantity:row.quantity.toString(),unitCost:row.unitCost.toString(),
-      value:row.valueByn.toString(),money:row.moneyByn.toString(),sourceId:row.sourceMovementId,revision:row.accountingRevision,createdAt:row.createdAt.toISOString()};
+    return {id:row.movementId,type:row.movement.type,quantity:row.quantity.toString(),unitCost:row.unitCost.toFixed(9),
+      value:row.valueByn.toFixed(9),money:row.moneyByn.toFixed(2),sourceId:row.sourceMovementId,revision:row.accountingRevision,createdAt:row.createdAt.toISOString()};
   });
-  const before={quantity:balance.quantity.toString(),value:balance.valueByn.toString()};
+  const before={quantity:balance.quantity.toFixed(3),value:balance.valueByn.toFixed(9)};
   const plan=planWarehouseDeletion(facts,before,movementId);
   for(const row of rows){
     const counter=plan.baselineReturns.get(row.movementId);
@@ -58,6 +59,8 @@ async function loadPlan(tx:Tx,actor:DomainActor,movementId:string){
   const reasons=new Map(plan.deleted.map(row=>[row.id,row.reason]));
   const affected=rows.filter(row=>reasons.has(row.movementId));
   const issueMovementIds=affected.map(row=>row.movementId);
+  if(await tx.expenseReceiptLine.findFirst({where:{movementId:{in:issueMovementIds}},select:{id:true}}))
+    throw Error('Операция затрагивает оприходование по чеку. Отменяйте его отдельным действием в журнале');
   const trackedIssue=await tx.expenseReceiptIssueLine.findFirst({where:{issue:{cancelledAt:null},movement:activeStockMovementWhere,
     OR:[{sourceMovementId:{in:issueMovementIds}},{movementId:{in:issueMovementIds}}]},select:{movementId:true}});
   if(trackedIssue)throw Error("Операция затрагивает выдачу по оплаченному чеку. Сначала отмените выдачу в журнале");
@@ -75,7 +78,7 @@ async function loadPlan(tx:Tx,actor:DomainActor,movementId:string){
     const movement=row.movement,payment=movement.stockPurchase?.payment;
     if(movement.receiptKind==='PAID'&&!payment)throw incomplete();
     if(payment){
-      if(movement.type!=='INCOME'||movement.receiptKind!=='PAID'||payment.direction!=='EXPENSE'||payment.projectId||payment.deletionId||
+      if(movement.type!=='INCOME'||movement.receiptKind!=='PAID'||payment.direction!=='EXPENSE'||payment.projectId||payment.deletionId||payment.deletedAt||
         !payment.cashAccount||payment.currency!==payment.cashAccount.currency||!payment.bynAmount.eq(row.moneyByn))throw incomplete();
       paymentIds.push(payment.id);
       const prior=refunds.get(payment.cashAccount.id);
@@ -94,42 +97,80 @@ async function loadPlan(tx:Tx,actor:DomainActor,movementId:string){
     movements:plan.deleted.map(item=>{const row=affected.find(row=>row.movementId===item.id)!;return {id:item.id,type:row.movement.type,date:row.createdAt.toISOString(),
       quantity:row.quantity.toString(),money:row.moneyByn.toFixed(2),productNumber:row.movement.product?.number??null,reason:item.reason};}),
     refunds:[...refunds.values()],projects:[...projects.values()]};
-  return {preview,plan,balance,rows,affected,lineChanges,paymentIds,productRefs:affected.flatMap(row=>row.movement.product?[{id:row.movement.product.id,projectId:row.movement.product.project.id}]:[])};
+  return {preview,plan,balance,rows,affected,lines,lineChanges,paymentIds,productRefs:affected.flatMap(row=>row.movement.product?[{id:row.movement.product.id,projectId:row.movement.product.project.id}]:[])};
 }
 
 export async function previewMovementDeletionInTransaction(tx:Tx,actor:DomainActor,movementId:string){
   return (await loadPlan(tx,actor,movementId)).preview;
 }
-export async function deleteMovementInTransaction(tx:Tx,actor:DomainActor,input:MovementDeletionInput){
-  await requireAdministrator(tx,actor);
-  const data=movementDeletionSchema.parse(input);
+type ExpectedHide=Extract<WarehouseMovementReversal,{mode:'hide'}>;
+function ensureExpectedHide(loaded: Awaited<ReturnType<typeof loadPlan>>, expected: ExpectedHide){
+  const movement=loaded.affected.find(row=>row.movementId===expected.movementId)?.movement;
+  if(movement?.warehouseLifecycleRevision!==expected.revision)throw Error('Состояние движения уже менялось');
+  const actual=loaded.affected.map(row=>row.movementId).sort();
+  const planned=[...expected.movementIds].sort();
+  if(actual.length!==planned.length||actual.some((id,index)=>id!==planned[index]))throw Error('Появились зависимые движения. Проверьте их в складском журнале');
+}
+export async function previewWarehouseJournalHide(tx:Tx,actor:DomainActor,expected:ExpectedHide){
+  const loaded=await loadPlan(tx,actor,expected.movementId);
+  ensureExpectedHide(loaded,expected);
+  return loaded.preview;
+}
+
+export async function deleteMovementInTransaction(tx:Tx,actor:DomainActor,input:Omit<MovementDeletionInput,"planFingerprint">&{planFingerprint?:string},
+  journal?:{expected:ExpectedHide;rootId:string}){
+  await requireWarehouseDeleteActor(tx,actor);
+  const data=journal?movementDeletionSchema.omit({planFingerprint:true}).parse(input):movementDeletionSchema.parse(input);
   const previous=await tx.warehouseMovementDeletion.findUnique({where:{clientMutationId:data.clientMutationId},
     include:{movements:{select:{product:{select:{id:true,projectId:true}}}}}});
   if(previous){
-    if(previous.actorId!==actor.id||previous.rootMovementId!==data.movementId||previous.planFingerprint!==data.planFingerprint)
+    if(journal||previous.actorId!==actor.id||previous.rootMovementId!==data.movementId||previous.planFingerprint!==input.planFingerprint)
       throw Error('Идентификатор удаления уже использован с другими данными');
     return {id:previous.id,repeated:true,eventId:null,productRefs:previous.movements.flatMap(row=>row.product?[row.product]:[])};
   }
   const loaded=await loadPlan(tx,actor,data.movementId);
-  if(loaded.preview.planFingerprint!==data.planFingerprint)throw Error('Склад или связанные операции изменились. Обновите расчёт и подтвердите удаление заново.');
-  const deletion=await tx.warehouseMovementDeletion.create({data:{clientMutationId:data.clientMutationId,actorId:actor.id,rootMovementId:data.movementId,planFingerprint:data.planFingerprint}});
+  if(journal)ensureExpectedHide(loaded,journal.expected);
+  if(!journal&&loaded.preview.planFingerprint!==input.planFingerprint)throw Error('Склад или связанные операции изменились. Обновите расчёт и подтвердите удаление заново.');
   const ids=loaded.affected.map(row=>row.movementId);
+  const products=[...new Set(loaded.productRefs.map(row=>row.id))].sort();
+  const previousLines=loaded.lines.filter(row=>products.includes(row.productId));
+  const lineDeltas=loaded.lineChanges;
+  const counterDeltas=loaded.rows.flatMap(row=>{
+    if(row.movement.type!=='EXPENSE')return [];
+    const after=loaded.plan.returns.get(row.movementId)??{quantity:'0',value:'0',money:'0'};
+    const before={quantity:row.returnedQuantity.toString(),value:row.returnedValueByn.toFixed(9),money:row.returnedMoneyByn.toFixed(2)};
+    return row.returnedQuantity.eq(after.quantity)&&row.returnedValueByn.eq(after.value)&&row.returnedMoneyByn.eq(after.money)
+      ? [] : [{id:row.id,before,after}];
+  });
+  const snapshot=warehouseRestorationSnapshot.parse({
+    materialId:loaded.balance.materialId,runId:loaded.balance.runId,balanceRevision:loaded.balance.revision+1,
+    before:loaded.preview.before,after:loaded.preview.after,movementIds:ids,paymentIds:loaded.paymentIds,productIds:products,
+    lines:previousLines.map(row=>{
+      const change=lineDeltas.find(line=>line.id===row.id);
+      return {id:row.id,revision:row.warehouseCatalogRevision+(change?1:0),
+        before:row.issuedQty.toString(),after:change?.issuedQty.toString()??row.issuedQty.toString()};
+    }),counters:counterDeltas,
+  });
+  const deletion=await tx.warehouseMovementDeletion.create({data:{clientMutationId:data.clientMutationId,actorId:actor.id,
+    rootMovementId:data.movementId,planFingerprint:loaded.preview.planFingerprint,restorationSnapshot:snapshot}});
+  const rootId=journal?.rootId??`warehouse-deletion:${data.clientMutationId}`;
+  const productContexts=[...new Map(loaded.affected.flatMap(row=>row.movement.product
+    ? [[row.movement.product.id,journalProductContext(row.movement.product)] as const] : [])).values()];
   const marked=await tx.stockMovement.updateMany({where:{...activeStockMovementWhere,id:{in:ids}},data:{deletionId:deletion.id}});
   const payments=await tx.payment.updateMany({where:{...activePaymentWhere,id:{in:loaded.paymentIds}},data:{deletionId:deletion.id}});
   if(marked.count!==ids.length||payments.count!==loaded.paymentIds.length)throw Error('Список удаления изменился');
   await tx.warehouseBalance.update({where:{materialId:loaded.balance.materialId},data:{quantity:loaded.plan.position.quantity,valueByn:loaded.plan.position.value,revision:{increment:1}}});
   await tx.$executeRaw`UPDATE "Material" SET "purchasePrice"=CAST(${averagePrice(loaded.plan.position)} AS numeric) WHERE id=${loaded.balance.materialId}`;
   for(const line of loaded.lineChanges)await tx.projectMaterial.update({where:{id:line.id},data:{issuedQty:line.issuedQty}});
-  for(const row of loaded.rows.filter(row=>row.movement.type==='EXPENSE')){
-    const counter=loaded.plan.returns.get(row.movementId)??{quantity:'0',value:'0',money:'0'};
-    if(!row.returnedQuantity.eq(counter.quantity)||!row.returnedValueByn.eq(counter.value)||!row.returnedMoneyByn.eq(counter.money))
-      await tx.warehouseMovementValuation.update({where:{id:row.id},data:{returnedQuantity:counter.quantity,returnedValueByn:counter.value,returnedMoneyByn:counter.money}});
-  }
+  for(const {id,after} of counterDeltas)
+    await tx.warehouseMovementValuation.update({where:{id},data:{returnedQuantity:after.quantity,returnedValueByn:after.value,returnedMoneyByn:after.money}});
   for(const row of loaded.affected){
     const movement=row.movement;
-    await writeChangeLogInTransaction(tx,{entity:'stockMovement',entityId:movement.id,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,
+    const root=movement.id===data.movementId&&!journal;
+    await writeChangeLogInTransaction(tx,{...(root?{id:rootId,reversal:warehouseMovementCommand({mode:'restore',deletionId:deletion.id})}:{operationRootId:rootId}),
+      entity:'stockMovement',entityId:movement.id,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,
       action:'softDelete',newValue:{deletionId:deletion.id,rootMovementId:data.movementId}},
-      {entity:{label:`Движение материала ${loaded.preview.materialName}`},contexts:movement.product?[journalProductContext(movement.product)]:[],
+      {entity:{label:`Движение материала ${loaded.preview.materialName}`},contexts:root?productContexts:movement.product?[journalProductContext(movement.product)]:[],
        ...(movement.id!==data.movementId?journalAutomatic(actor,'Отмена связанного движения при удалении исходной складской операции'):{}),
        before:{type:movement.type,receiptKind:movement.receiptKind,material:loaded.preview.materialName,materialId:movement.materialId,
         product:movement.product?.number??null,quantity:movement.quantity.toString(),unitPrice:movement.unitPrice?.toString()??null,
@@ -141,11 +182,11 @@ export async function deleteMovementInTransaction(tx:Tx,actor:DomainActor,input:
   for(const paymentId of loaded.paymentIds){
     const payment=loaded.affected.find(row=>row.movement.stockPurchase?.paymentId===paymentId)?.movement.stockPurchase?.payment;
     if(!payment)throw Error('Не найден снимок отменяемого платежа склада');
-    await writeChangeLogInTransaction(tx,{entity:'payment',entityId:paymentId,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,
+    await writeChangeLogInTransaction(tx,{operationRootId:rootId,entity:'payment',entityId:paymentId,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,
       action:'softDelete',newValue:{deletionId:deletion.id,rootMovementId:data.movementId}},
       {...journalAutomatic(actor,'Отмена оплаты при удалении прихода на склад'),entity:{label:`Расход ${payment.amount.toString()} ${payment.currency}`},contexts:[],
        before:paymentJournalSnapshot(payment,{cashAccount:payment.cashAccount?.name,documentIds:payment.reportDocuments.map(document=>document.documentId)}),after:null});
   }
   const event=await tx.domainEvent.create({data:{type:'stock.movement.deleted',actor:actor.id,payload:{deletionId:deletion.id,movementIds:ids,paymentIds:loaded.paymentIds}}});
-  return {id:deletion.id,repeated:false,eventId:event.id,productRefs:loaded.productRefs};
+  return {id:deletion.id,repeated:false,eventId:event.id,productRefs:loaded.productRefs,preview:loaded.preview};
 }

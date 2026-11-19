@@ -1272,12 +1272,16 @@ model WarehouseMovementDeletion {
   clientMutationId String @unique
   actorId String
   actor User @relation(fields: [actorId], references: [id], onDelete: Restrict)
-  rootMovementId String @unique
+  rootMovementId String
   rootMovement StockMovement @relation("WarehouseDeletionRoot", fields: [rootMovementId], references: [id], onDelete: Restrict)
   planFingerprint String
+  restorationSnapshot Json?
+  restoredAt DateTime?
   createdAt DateTime @default(now())
   movements StockMovement[] @relation("DeletedMovements")
   payments Payment[]
+
+  @@index([rootMovementId])
 }
 
 model StockMovement {
@@ -1292,7 +1296,8 @@ model StockMovement {
   expenseReceiptIssueLine ExpenseReceiptIssueLine? @relation("ExpenseReceiptIssueMovement")
   deletionId        String?
   deletion          WarehouseMovementDeletion? @relation("DeletedMovements", fields: [deletionId], references: [id], onDelete: Restrict)
-  rootDeletion      WarehouseMovementDeletion? @relation("WarehouseDeletionRoot")
+  rootDeletions     WarehouseMovementDeletion[] @relation("WarehouseDeletionRoot")
+  warehouseLifecycleRevision Int @default(0)
   quantity          Decimal           @db.Decimal(12, 3)
   unitPrice         Decimal?          @db.Decimal(12, 2) // BYN/ед., снимок (обязателен для EXPENSE/RETURN)
   totalByn          Decimal?          @db.Decimal(12, 2) // quantity × unitPrice, снимок

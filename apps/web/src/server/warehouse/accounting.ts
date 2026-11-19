@@ -12,6 +12,7 @@ import { addPosition, addPaidPosition, addValue, issuePosition, returnShare, ave
 import {warehouseMetadataGate} from './gate';
 import {activeStockMovementWhere} from './active-records';
 import {journalProductContext} from '@/server/finance/journal';
+import { warehouseMovementCommand } from './movement-reversal-contract';
 import { expenseIssueProductWhere, requireExpenseIssueRole } from './expense-issue-access';
 
 type Tx=Prisma.TransactionClient;
@@ -112,7 +113,9 @@ export async function warehouseMove(tx:Tx,actor:WarehouseActor,input:WarehouseMo
  await tx.$executeRaw`UPDATE "Material" SET "purchasePrice"=CAST(${averagePrice(result.position)} AS numeric) WHERE id=${materialId}`;
  if(line)await tx.projectMaterial.update({where:{id:line.id},data:{issuedQty:input.kind==='EXPENSE'?{increment:quantity}:{decrement:quantity}}});
  const eventId='warehouse94-'+clientMutationId;
- await writeChangeLogInTransaction(tx, {id:eventId,operationRootId:paidReceipt?.operationRootId??expenseIssue?.operationRootId,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,source:actor.source,entity:'stockMovement',entityId:movement.id,action:'create',newValue:{type:input.kind,receiptKind:movement.receiptKind,material:material.name,quantity,unitPrice:movement.unitPrice?.toString()??null}},
+ await writeChangeLogInTransaction(tx, {id:eventId,operationRootId:paidReceipt?.operationRootId??expenseIssue?.operationRootId,
+  ...(!paidReceipt?.operationRootId&&!expenseIssue?.operationRootId&&{reversal:warehouseMovementCommand({mode:'hide',movementId:movement.id,
+    movementIds:[movement.id],revision:movement.warehouseLifecycleRevision??0})}),actorType:'user',actorId:actor.id,actorName:actor.name??undefined,source:actor.source,entity:'stockMovement',entityId:movement.id,action:'create',newValue:{type:input.kind,receiptKind:movement.receiptKind,material:material.name,quantity,unitPrice:movement.unitPrice?.toString()??null}},
   {entity:{label:`${input.kind==='INCOME'?'Приход':input.kind==='EXPENSE'?'Выдача':'Возврат'} материала ${material.name}`},contexts:product?[journalProductContext(product)]:[],
    links:[{type:'material',id:material.id,label:material.name},...(product?[{type:'product',...journalProductContext(product)}]:[]),
     ...(paidReceipt?.purchase?[{type:'cashAccount',id:paidReceipt.purchase.cashAccountId,label:paidReceipt.purchase.cashAccount}]:[])],

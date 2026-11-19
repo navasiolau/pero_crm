@@ -71,7 +71,7 @@ export async function createStockPurchaseInTransaction(actor: DomainActor, input
       rate: new Prisma.Decimal(prepared.rate).toString(), rateDate: prepared.rateDate?.toISOString() ?? null,
       paidAt: prepared.paidAt.toISOString(), reportDocumentIds: inputReportDocumentIds(data),
     } });
-  const money = await createPaymentInTransaction(actor, monetaryInput, prepared, tx, { movementId: stock.movement.id });
+  const money = await createPaymentInTransaction(actor, monetaryInput, prepared, tx, { movementId: stock.movement.id, operationRootId: stock.eventId });
   const receipt = await tx.stockPurchase.create({ data: { clientMutationId: data.clientMutationId,
     requestFingerprint: stockPurchaseFingerprint(actor.id, data), actorId: actor.id, unitPrice: data.unitPrice,
     movementId: stock.movement.id, paymentId: money.payment.id }, include: receiptInclude });
