@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { lockFileStorageBinding } from "./storage-binding-fence";
+import { defineJournalReversal, JournalReversalRefusal } from "@/server/changelog/reversal-contract";
 
 const fileReversalState = z.object({
   id: z.string().min(1),
@@ -84,7 +85,7 @@ export async function applyRetainedFileReversal(
     await lockFileStorageBinding(tx, file.projectId, file.storedName);
   }
   const conflict = await checkRetainedFileReversal(tx, data);
-  if (conflict) throw new Error(conflict);
+  if (conflict) throw new JournalReversalRefusal(conflict);
   const now = new Date();
   for (const file of data.files) {
     await tx.file.update({ where: { id: file.id }, data: {
@@ -101,3 +102,24 @@ export async function applyRetainedFileReversal(
   };
 }
 
+
+export const retainedFileReversal = defineJournalReversal({
+  kind: "file.retained",
+  version: 1,
+  schema: retainedFileReversalSchema,
+  preview: ({ tx }, data) => checkRetainedFileReversal(tx, data),
+  async apply({ tx, actor }, data) {
+    const inverse = await applyRetainedFileReversal(tx, actor.id, data);
+    const projectIds = new Set(data.files.map(file => file.projectId));
+    const productIds = new Set(data.files.flatMap(file => file.productId ? [file.productId] : []));
+    if (data.pointer?.kind === "project") projectIds.add(data.pointer.id);
+    if (data.pointer?.kind === "product") productIds.add(data.pointer.id);
+    if (productIds.size) {
+      const products = await tx.product.findMany({ where: { id: { in: [...productIds] } }, select: { number: true, projectId: true } });
+      for (const product of products) projectIds.add(product.projectId);
+      return { inverse, cachePaths: ["/products", "/projects", ...products.map(product => "/products/" + encodeURIComponent(product.number)),
+        ...[...projectIds].map(id => "/projects/" + encodeURIComponent(id))] };
+    }
+    return { inverse, cachePaths: ["/projects", ...[...projectIds].map(id => "/projects/" + encodeURIComponent(id))] };
+  },
+});

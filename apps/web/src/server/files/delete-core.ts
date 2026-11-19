@@ -36,13 +36,19 @@ export async function deleteOrdinaryFileCore(tx:Prisma.TransactionClient,identit
  if(!file)return failure("Файл не найден");
  if(!await mayDeleteStoredFile(tx,actor,file))return failure("Недостаточно прав");
  await lockFileStorageBinding(tx,file.projectId,file.storedName);
- if (file.coverForProject && file.coverForProject.id !== context.projectId ||
-  file.sketchForProduct && file.sketchForProduct.id !== context.productId)
+ if ((file.coverForProject && file.sketchForProduct) ||
+  (file.coverForProject && file.coverForProject.id !== context.projectId) ||
+  (file.sketchForProduct && file.sketchForProduct.id !== context.productId))
   return failure("Проверьте привязку файла в карточке проекта");
  if (file.coverForProject)
   await tx.project.update({ where: { id: file.coverForProject.id, coverFileId: file.id }, data: { coverFileId: null } });
  if (file.sketchForProduct)
   await tx.product.update({ where: { id: file.sketchForProduct.id, sketchFileId: file.id }, data: { sketchFileId: null } });
- await tx.file.update({where:{id:file.id},data:{deletedAt:new Date(),deletedById:actor.id}});
- return(await persistFileDeleteIntent(tx,{id:actor.id,name:user.name},file,input.clientMutationId,storage)).result;
+
+ const deletedAt = new Date();
+ await tx.file.update({where:{id:file.id},data:{deletedAt,deletedById:actor.id}});
+ const owner = file.coverForProject ? { kind: "project" as const, id:file.coverForProject.id }
+  : file.sketchForProduct ? { kind: "product" as const, id:file.sketchForProduct.id } : undefined;
+ return(await persistFileDeleteIntent(tx,{id:actor.id,name:user.name},file,input.clientMutationId,storage,deletedAt,
+  owner && {...owner,expectedFileId:null,fileId:file.id})).result;
 }
