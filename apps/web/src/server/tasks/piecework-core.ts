@@ -16,6 +16,8 @@ import { readTaskPayroll, splitTaskPayroll, TaskPayrollTransferError } from "./t
 import type {JournalPresentationHints,JournalValue} from '@/server/changelog/contract';
 import {operationJournalContext,journalSnapshot,journalUserReferences,systemJournalActor,TASK_JOURNAL_FIELDS} from './journal';
 
+import { pieceworkUndoCommand, taskShareSnapshot, type PieceworkUndo } from "./piecework-reversal-contract";
+
 const id = z.string().min(1).max(128);
 const participant = z.object({ userId: id, percent: z.string().trim().min(1).max(8) }).strict();
 export const createPieceworkSchema = z.object({
@@ -79,14 +81,17 @@ async function readReceipt(tx: Prisma.TransactionClient, actorId: string, uuid: 
     !Array.isArray(result.taskIds) || !result.taskIds.every(value => typeof value === "string") ||
     !Array.isArray(result.recipientIds) || !result.recipientIds.every(value => typeof value === "string"))
     deny("Идентификатор операции уже использован для другого распределения", "conflict");
+  const taskIds = result.taskIds as string[];
+  if (receipt.reversal && await tx.task.count({ where: { id: { in: taskIds }, deletedAt: null } }) !== taskIds.length)
+    deny("Распределение отменено. Обновите карточку", "conflict");
   return { ok: true, groupId: result.groupId, projectId: result.projectId, productId: result.productId,
-    taskIds: result.taskIds as string[], recipientIds: result.recipientIds as string[], eventIds: [], repeated: true };
+    taskIds, recipientIds: result.recipientIds as string[], eventIds: [], repeated: true };
 }
 
-async function saveReceipt(tx: Prisma.TransactionClient, actor: DomainActor, uuid: string, hash: string, result: PieceworkSuccess, snapshot: unknown,journal:JournalPresentationHints) {
+async function saveReceipt(tx: Prisma.TransactionClient, actor: DomainActor, uuid: string, hash: string, result: PieceworkSuccess, snapshot: unknown,journal:JournalPresentationHints, reversal: PieceworkUndo) {
   await writeChangeLogInTransaction(tx, {
     id: receiptId(uuid), actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
-    entity: "taskAllocationGroup", entityId: result.groupId, action: "piecework.v1",
+    entity: "taskAllocationGroup", entityId: result.groupId, action: "piecework.v1", reversal: pieceworkUndoCommand(reversal),
     newValue: JSON.parse(JSON.stringify({ fingerprint: hash, result, snapshot })) as Prisma.InputJsonValue,
   },{...journal,kind:'event'});
 }
@@ -103,7 +108,7 @@ async function dependenciesFor(tx: Prisma.TransactionClient, ids: string[], proj
   const selected = await tx.task.findMany({ where: { ...liveTaskWhere, id: { in: ids }, projectId, productId }, select: { id: true, allocationGroupId: true } });
   if (selected.length !== ids.length) deny("Одна из зависимостей недоступна");
   const groups = [...new Set(selected.flatMap(task => task.allocationGroupId ? [task.allocationGroupId] : []))];
-  const parts = groups.length ? await tx.task.findMany({ where: { allocationGroupId: { in: groups } }, select: { id: true, projectId: true, productId: true } }) : [];
+  const parts = groups.length ? await tx.task.findMany({ where: { ...liveTaskWhere, allocationGroupId: { in: groups } }, select: { id: true, projectId: true, productId: true } }) : [];
   if (parts.some(task => task.projectId !== projectId || task.productId !== productId)) deny("Зависимость принадлежит другому изделию");
   return [...new Set([...selected, ...parts].map(task => task.id))];
 }
@@ -155,6 +160,7 @@ export async function createPieceworkAllocationCore(actor: DomainActor, input: u
     const allocation = allocatePiecework(budget, participants.map(row => row.percent));
     const taskIds: string[] = [], eventIds: string[] = [];
     const taskSnapshots:Record<string,JournalValue>[]=[];
+    const undoTasks: PieceworkUndo["tasks"] = [];
     for (const [index, row] of participants.entries()) {
       const task = await tx.task.create({ data: {
         projectId: product.projectId, productId: product.id, workId: work.id, title: data.title, type: data.type,
@@ -163,6 +169,8 @@ export async function createPieceworkAllocationCore(actor: DomainActor, input: u
         requiresPhoto: data.requiresPhoto || data.type === "Замер", dependencies: { create: dependencies.map(dependsOnId => ({ dependsOnId })) },
       } });
       taskIds.push(task.id);
+      const journalState = dependencies.length ? await tx.task.findUniqueOrThrow({ where: { id: task.id }, select: { journalRevision: true } }) : task;
+      undoTasks.push({ id: task.id, revision: journalState.journalRevision, deleted: false, restoreDeleted: true, restoreShare: null });
       taskSnapshots.push({taskId:task.id,...journalSnapshot(task,TASK_JOURNAL_FIELDS),dependencyIds:dependencies});
       const event = await tx.domainEvent.create({ data: { type: "task.assigned", actor: current.id, payload: { taskId: task.id, projectId: product.projectId, productId: product.id, assigneeId: row.userId } } });
       eventIds.push(event.id);
@@ -171,7 +179,8 @@ export async function createPieceworkAllocationCore(actor: DomainActor, input: u
     await saveReceipt(tx, { ...actor, name: current.name }, data.clientMutationId, hash, result, { quantity, budget, currency, rate: work.priceSnapshot!.toString(), participants },
       {...await operationJournalContext(tx,{type:'taskAllocationGroup',id:group.id,label:`Распределение: ${data.title}`},[{productId:product.id,projectId:product.projectId,product}],
         [...await journalUserReferences(tx,participants.map(row=>row.userId)),...taskIds.map(id=>({type:'task',id,label:data.title}))]),
-        before:null,after:{quantity,budget,currency,tasks:taskSnapshots}});
+        before:null,after:{quantity,budget,currency,tasks:taskSnapshots}},
+      { groupId: group.id, workId: work.id, activeGroupIds: taskIds, affectedDependents: [], budget, quantity, currency, ordinaryRate: null, tasks: undoTasks });
     return result;
   }));
 }
@@ -203,8 +212,9 @@ export async function transferPieceworkShareCore(actor: DomainActor, input: unkn
     await validateRecipients(tx, [data.recipientId], product);
     const group = task.allocationGroup;
     if (Boolean(task.allocationGroupId) !== Boolean(group)) deny("Группа задачи не найдена");
+    let groupTaskIds = [task.id];
     if (group) {
-      const parts = await tx.task.findMany({ where: { allocationGroupId: group.id }, select: { projectId: true, productId: true, workId: true, quantity: true, shareUnits: true, shareAmount: true, physicalOnlyShare: true, stageShareUnits: true } });
+      const parts = await tx.task.findMany({ where: { ...liveTaskWhere, allocationGroupId: group.id }, select: { id: true, projectId: true, productId: true, workId: true, quantity: true, shareUnits: true, shareAmount: true, physicalOnlyShare: true, stageShareUnits: true } });
       let valid = false;
       try {
         valid = group.workId === task.workId && group.budgetSource === "TASK_FIXED" && group.budget !== null && group.quantity !== null &&
@@ -215,6 +225,7 @@ export async function transferPieceworkShareCore(actor: DomainActor, input: unkn
           parts.reduce((sum, part) => sum + moneyAtoms(part.shareAmount ?? 0), BigInt(0)) === moneyAtoms(group.budget!);
       } catch { /* Противоречивые исторические данные не исправляются этой командой. */ }
       if (!valid) deny("Распределение общей работы не согласовано — обратитесь к администратору");
+      groupTaskIds = parts.map(part => part.id);
     } else if (task.shareUnits !== null || task.shareAmount !== null || work.priceSnapshot === null) deny("У задачи нет согласованного снимка обычной работы");
     const budget = group ? task.shareAmount!.toString() : taskPieceAmount(task, work.priceSnapshot!);
     if (moneyAtoms(budget) > BigInt("999999999999")) deny("Бюджет превышает допустимую сумму");
@@ -249,6 +260,7 @@ export async function transferPieceworkShareCore(actor: DomainActor, input: unkn
     await splitTaskPayroll(tx, { ...actor, name: current.name }, payroll, data.recipientId, child.id, percent, data.clientMutationId);
     const edges = [...predecessors.map(edge => ({ taskId: child.id, dependsOnId: edge.dependsOnId })), ...dependents.map(edge => ({ taskId: edge.taskId, dependsOnId: child.id }))];
     if (edges.length) await tx.taskDependency.createMany({ data: edges, skipDuplicates: true });
+    const childJournal = edges.length ? await tx.task.findUniqueOrThrow({ where: { id: child.id }, select: { journalRevision: true } }) : child;
     const currentDependencies=dependentSnapshots.length?await tx.taskDependency.findMany({where:{...activeTaskDependencyWhere,taskId:{in:dependentSnapshots.map(row=>row.id)}},select:{taskId:true,dependsOnId:true}}):[];
     for(const dependent of dependentSnapshots){
       const beforeIds=[...new Set(dependent.dependencies.map(edge=>edge.dependsOnId))].sort();
@@ -256,7 +268,7 @@ export async function transferPieceworkShareCore(actor: DomainActor, input: unkn
       if(JSON.stringify(beforeIds)===JSON.stringify(afterIds))continue;
       const references=[...dependent.dependencies.map(edge=>({type:'task',id:edge.dependsOnId,label:edge.dependsOn.title})),{type:'task',id:child.id,label:child.title}];
       await writeChangeLogInTransaction(tx,{actorType:'user',actorId:current.id,actorName:current.name,source:actor.source,
-        entity:'task',entityId:dependent.id,action:'update',field:'dependencyIds',oldValue:{dependencyIds:beforeIds},newValue:{dependencyIds:afterIds}},
+        entity:'task',entityId:dependent.id,action:'update',field:'dependencyIds',operationRootId:receiptId(data.clientMutationId),oldValue:{dependencyIds:beforeIds},newValue:{dependencyIds:afterIds}},
         {...await operationJournalContext(tx,{type:'task',id:dependent.id,label:dependent.title},[dependent],references),
           ...systemJournalActor(current,'Разделение предшествующей задачи')});
     }
@@ -266,7 +278,13 @@ export async function transferPieceworkShareCore(actor: DomainActor, input: unkn
       {...await operationJournalContext(tx,{type:'taskAllocationGroup',id:allocationGroup.id,label:`Разделение: ${task.title}`},[{...task,product}],
         [...await journalUserReferences(tx,[task.assigneeId,data.recipientId]),{type:'task',id:task.id,label:task.title},{type:'task',id:child.id,label:child.title}]),
         before:{tasks:[{taskId:task.id,...journalSnapshot(task,TASK_JOURNAL_FIELDS)}]},
-        after:{tasks:[{taskId:task.id,...journalSnapshot(updated,TASK_JOURNAL_FIELDS)},{taskId:child.id,...journalSnapshot(child,TASK_JOURNAL_FIELDS),dependencyIds:predecessors.map(row=>row.dependsOnId)}],dependentIds:dependents.map(row=>row.taskId)}});
+        after:{tasks:[{taskId:task.id,...journalSnapshot(updated,TASK_JOURNAL_FIELDS)},{taskId:child.id,...journalSnapshot(child,TASK_JOURNAL_FIELDS),dependencyIds:predecessors.map(row=>row.dependsOnId)}],dependentIds:dependents.map(row=>row.taskId)}},
+      { groupId: allocationGroup.id, workId: work.id, activeGroupIds: [...groupTaskIds, child.id], affectedDependents: dependentIds,
+        budget: group?.budget?.toString() ?? budget, quantity: group?.quantity?.toString() ?? task.quantity.toString(), currency,
+        ordinaryRate: group ? null : work.priceSnapshot!.toString(), tasks: [
+          { id: task.id, revision: updated.journalRevision, deleted: false, restoreDeleted: false, restoreShare: taskShareSnapshot(task) },
+          { id: child.id, revision: childJournal.journalRevision, deleted: false, restoreDeleted: true, restoreShare: null },
+        ] });
     return result;
   }));
 }

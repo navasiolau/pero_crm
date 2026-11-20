@@ -46,7 +46,7 @@ export function taskDetailsIncludeFor(actor: VisibilityActor) {
     files: { ...taskDetailsInclude.files, where: fileVisibilityWhere(actor) },
     dependencies: {
       ...taskDetailsInclude.dependencies,
-      where: { dependsOn: taskVisibilityWhere(actor) },
+      where: { ...activeTaskDependencyWhere, dependsOn: taskVisibilityWhere(actor) },
     },
   } as const;
 }

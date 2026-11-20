@@ -10,6 +10,7 @@ import {allocatedWorkQuantity,quantityAtoms,quantityFromAtoms} from '@/lib/work-
 import {liveProductWhere,liveProjectWhere,liveWorkWhere} from '@/server/access/live-entities';
 import type {DomainActor} from '@/server/projects/core';
 import {withTaskTransaction,type TaskTransaction} from './transaction';
+import { workTaskLifecycleCommand } from './lifecycle-contract';
 import {operationJournalContext,journalSnapshot,journalUserReferences,journalTaskReferences,TASK_JOURNAL_FIELDS} from './journal';
 
 const id=z.string().min(1).max(128);
@@ -64,12 +65,14 @@ export async function createWorkerTaskAllocationCore(actor:DomainActor,input:unk
    const selected=await tx.task.findMany({where:{deletedAt:null,id:{in:dependencyIds},projectId:data.projectId,productId:data.productId},select:{id:true,projectId:true,productId:true,allocationGroupId:true}});
    if(selected.length!==dependencyIds.length)deny('Одна из зависимостей недоступна');
    const groups=[...new Set(selected.flatMap(task=>task.allocationGroupId?[task.allocationGroupId]:[]))];
-   const parts=groups.length?await tx.task.findMany({where:{allocationGroupId:{in:groups}},select:{id:true,projectId:true,productId:true}}):[];
+   const parts=groups.length?await tx.task.findMany({where:{deletedAt:null,allocationGroupId:{in:groups}},select:{id:true,projectId:true,productId:true}}):[];
    if([...selected,...parts].some(task=>task.projectId!==data.projectId||task.productId!==data.productId))deny('Зависимость принадлежит другому изделию');
    dependencies=[...new Set([...selected,...parts].map(task=>task.id))];
   }
   const task=await tx.task.create({data:{id:randomUUID(),projectId:data.projectId,productId:data.productId,workId:work.id,title:data.title,type:data.type,quantity,status:'NEW',assigneeId:recipient.id,createdById:current.id,dueAt,estimateMinutes:null,requiresPhoto:data.requiresPhoto||data.type==='Замер',dependencies:{create:dependencies.map(dependsOnId=>({dependsOnId}))}}});
-  await writeChangeLogInTransaction(tx, {actorType:'user',actorId:current.id,actorName:current.name,source:actor.source,entity:'task',entityId:task.id,action:'create',newValue:{title:task.title,workId:work.id,productId:data.productId,quantity,assigneeId:recipient.id}},
+  const journalState = dependencies.length ? await tx.task.findUniqueOrThrow({ where: { id: task.id }, select: { journalRevision: true } }) : task;
+  await writeChangeLogInTransaction(tx, {actorType:'user',actorId:current.id,actorName:current.name,source:actor.source,entity:'task',entityId:task.id,action:'create',
+    reversal: workTaskLifecycleCommand({ entity: 'task', id: task.id, revision: journalState.journalRevision, deleted: false }), newValue:{title:task.title,workId:work.id,productId:data.productId,quantity,assigneeId:recipient.id}},
     {...await operationJournalContext(tx,{type:'task',id:task.id,label:task.title},[{...task,product,project}],
       [...await journalUserReferences(tx,[recipient.id]),...await journalTaskReferences(tx,dependencies)]),
       before:null,after:{...journalSnapshot(task,TASK_JOURNAL_FIELDS),dependencyIds:dependencies}});

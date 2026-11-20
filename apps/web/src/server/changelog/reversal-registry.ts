@@ -40,6 +40,7 @@ import { apiTokenCreationReversal } from "@/server/plugins/token-creation-revers
 import { financeDocumentUploadReversal } from "@/server/finance-documents/upload-reversal";
 import { pluginMutationReversal } from "@/server/plugins/settings-reversal";
 import { notificationReadReversal } from "@/server/notifications/read-reversal";
+import { pieceworkReversal } from "@/server/tasks/piecework-reversal";
 
 export const journalReversals = [
   ...productFieldReversals,
@@ -86,4 +87,5 @@ export const journalReversals = [
   financeDocumentUploadReversal,
   pluginMutationReversal,
   notificationReadReversal,
+  pieceworkReversal,
 ];

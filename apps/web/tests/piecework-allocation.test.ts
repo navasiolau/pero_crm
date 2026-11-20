@@ -166,3 +166,116 @@ test("transactional failure rolls back both source and children while lost ACK r
   assert.equal(repeated.ok, true); if (repeated.ok) assert.equal(repeated.repeated, true);
   assert.deepEqual(g.state(), committed);
 });
+
+test("closing a created group hides all shares and reversal restores their IDs and frozen amounts", async () => {
+  const { reverseJournalActionInTransaction } = await import("../src/server/changelog/reversal-core");
+  const f = available(), input = initial(f);
+  const group = await createPieceworkAllocationCore(manager, input, f.transaction);
+  assert.ok(group.ok);
+  const tasks = () => f.state().tasks.filter(row => row.allocationGroupId === group.groupId);
+  const original = tasks().map(row => [row.id, row.shareUnits, row.shareAmount]);
+  const undo = (entryId: string, requestId = randomUUID()) =>
+    f.transaction(tx => reverseJournalActionInTransaction(tx, "director", { entryId, requestId, scope: { kind: "global" } }));
+  const requestId = randomUUID();
+  const result = await undo("piecework-v1:" + input.clientMutationId, requestId);
+  assert.equal((await undo("piecework-v1:" + input.clientMutationId, requestId)).reversalId, result.reversalId);
+  assert.ok(tasks().every(row => row.deletedAt instanceof Date));
+  assert.deepEqual(tasks().map(row => [row.id, row.shareUnits, row.shareAmount]), original);
+  assert.equal(f.state().groups[0].budget, "1000.00");
+  await undo(result.reversalId);
+  assert.ok(tasks().every(row => row.deletedAt === null));
+  assert.deepEqual(tasks().map(row => [row.id, row.shareUnits, row.shareAmount]), original);
+});
+
+test("transfer reverses from the dependent journal row and retains inactive history and the inherited edges", async () => {
+  const { reverseJournalActionInTransaction } = await import("../src/server/changelog/reversal-core");
+  const f = taskShareFixture();
+  f.state().times = [];
+  const input = transfer();
+  const split = await transferPieceworkShareCore(manager, input, f.transaction);
+  assert.ok(split.ok);
+  const dependentEntry = f.state().logs.find(row => row.operationRootId === "piecework-v1:" + input.clientMutationId)!;
+  assert.equal(dependentEntry.entityId, "dependent");
+  const source = () => f.state().tasks.find(row => row.id === "source")!;
+  const child = () => f.state().tasks.find(row => row.id === split.taskIds[1])!;
+  const undo = (entryId: string) => f.transaction(tx =>
+    reverseJournalActionInTransaction(tx, "admin", { entryId, requestId: randomUUID(), scope: { kind: "global" } }));
+  const dependent = f.state().tasks.find(row => row.id === "dependent")!;
+  dependent.status = "IN_PROGRESS";
+  await assert.rejects(() => undo(String(dependentEntry.id)), /зависимая задача/);
+  assert.equal(source().shareAmount, "700.00");
+  assert.equal(child().deletedAt, null);
+  f.state().tasks.find(row => row.id === "dependent")!.status = "NEW";
+  const undone = await undo(String(dependentEntry.id));
+  assert.equal(source().allocationGroupId, null);
+  assert.equal(source().shareAmount, null);
+  assert.ok(child().deletedAt instanceof Date);
+  assert.ok(f.state().dependencies.some(row => row.taskId === "dependent" && row.dependsOnId === child().id));
+  await undo(undone.reversalId);
+  assert.equal(source().shareAmount, "700.00");
+  assert.equal(child().deletedAt, null);
+  assert.equal(child().shareAmount, "300.00");
+});
+
+test("group reversal preserves closed and accrued work", async () => {
+  const { reverseJournalActionInTransaction } = await import("../src/server/changelog/reversal-core");
+  const f = available(), input = initial(f);
+  const group = await createPieceworkAllocationCore(manager, input, f.transaction);
+  assert.ok(group.ok);
+  f.state().entries.push({ id: "closed-fact", taskId: group.taskIds[0], amount: "500", bynAmount: "500" });
+  await assert.rejects(() => f.transaction(tx => reverseJournalActionInTransaction(tx, "director", {
+    entryId: "piecework-v1:" + input.clientMutationId, requestId: randomUUID(), scope: { kind: "global" },
+  })), /закрытая задача, начисление/);
+  assert.equal(f.state().entries.length, 1);
+  assert.ok(f.state().tasks.filter(row => group.taskIds.includes(String(row.id))).every(row => row.deletedAt === null));
+});
+
+test("field worker takes own work and ADMIN can undo and restore the same assignment", async () => {
+  const { createOwnWorkTaskCore } = await import("../src/server/tasks/worker-allocation-core");
+  const { reverseJournalActionInTransaction } = await import("../src/server/changelog/reversal-core");
+  const f = available();
+  const input = { projectId: "project", productId: "product", workId: "work", title: "Взять работу", type: "Производство",
+    quantity: "2", dueAt: "2026-11-21", clientMutationId: randomUUID(), dependencyIds: ["predecessor"] };
+  const created = await createOwnWorkTaskCore(worker, input, f.transaction);
+  assert.ok(created.ok);
+  const audit = f.state().logs.find(row => row.entityId === created.id && row.action === "create")!;
+  assert.ok(audit.reversal);
+  const undo = (entryId: unknown) => f.transaction(tx =>
+    reverseJournalActionInTransaction(tx, "admin", { entryId, requestId: randomUUID(), scope: { kind: "global" } }));
+  const result = await undo(audit.id);
+  const row = () => f.state().tasks.find(task => task.id === created.id)!;
+  assert.ok(row().deletedAt instanceof Date);
+  const replay = await createOwnWorkTaskCore(worker, input, f.transaction);
+  assert.ok(!replay.ok && replay.kind === "conflict");
+  await undo(result.reversalId);
+  assert.equal(row().deletedAt, null);
+  assert.equal(row().assigneeId, "worker");
+  assert.ok(f.state().dependencies.some(edge => edge.taskId === created.id && edge.dependsOnId === "predecessor"));
+});
+
+test("editing dependencies retires and restores the same edge, with both endpoint revisions", async () => {
+  const { updateTaskInTransaction, expandDependencies } = await import("../src/server/tasks/update-core");
+  const { reverseJournalActionInTransaction } = await import("../src/server/changelog/reversal-core");
+  const f = taskShareFixture();
+  f.state().times = [];
+  const edge = () => f.state().dependencies.find(row => row.taskId === "source" && row.dependsOnId === "predecessor")!;
+  const revisions = () => ["source", "predecessor"].map(id =>
+    f.state().tasks.find(row => row.id === id)!.journalDependencyRevision);
+  assert.deepEqual(revisions(), [0, 0]);
+  const edit = await f.transaction(tx => updateTaskInTransaction(tx, manager, "source", { dependencyIds: [] }));
+  assert.ok(edit.ok);
+  assert.ok(edge().deletedAt instanceof Date);
+  assert.deepEqual(revisions(), [1, 1]);
+  const noCycle = await f.transaction(tx => expandDependencies(tx, manager, "project", ["source"], "predecessor"));
+  assert.deepEqual(noCycle.ids, ["source"]);
+  const entry = f.state().logs.find(row => row.action === "update")!;
+  await f.transaction(tx => reverseJournalActionInTransaction(tx, "admin", {
+    entryId: entry.id, requestId: randomUUID(), scope: { kind: "global" },
+  }));
+  assert.equal(edge().deletedAt, null);
+  assert.deepEqual(revisions(), [2, 2]);
+  assert.equal(f.state().dependencies.filter(row => row.taskId === "source" && row.dependsOnId === "predecessor").length, 1);
+  assert.ok(!f.writes.includes("dependencies.delete"));
+  const cycle = await f.transaction(tx => expandDependencies(tx, manager, "project", ["source"], "predecessor"));
+  assert.match(cycle.error ?? "", /цикл/);
+});

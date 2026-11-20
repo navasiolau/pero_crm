@@ -446,6 +446,7 @@ model TaskDependency {
   task        Task   @relation("TaskDependencies", fields: [taskId], references: [id], onDelete: Cascade)
   dependsOnId String
   dependsOn   Task   @relation("TaskDependents", fields: [dependsOnId], references: [id], onDelete: Cascade)
+  deletedAt   DateTime?
 
   @@id([taskId, dependsOnId])
 }

@@ -49,8 +49,8 @@ async function inspect(tx: Prisma.TransactionClient, actorId: string, entity: Wo
     where: { ...liveChildWhere, id, ...(!restoring && { AND: [taskVisibilityWhere(actor)] }) },
     include: { ...ownerInclude, work: { select: { paymentKind: true } },
       _count: { select: { payrollEntries: true, timeEntries: true, stageSettlementShares: true } },
-      dependencies: { select: { dependsOnId: true } },
-      dependents: { select: { taskId: true, task: { select: { deletedAt: true, status: true,
+      dependencies: { where: { deletedAt: null }, select: { dependsOnId: true } },
+      dependents: { where: { deletedAt: null }, select: { taskId: true, task: { select: { deletedAt: true, status: true,
         _count: { select: { payrollEntries: true, stageSettlementShares: true } } } } } },
     },
   });
