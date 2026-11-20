@@ -68,7 +68,7 @@ export async function bindTelegramFinanceInTransaction(tx: Prisma.TransactionCli
   chatId: string; userId: string; sessionVersion: number; linkId: string | null; linkGeneration: number | null;
   expiresAt: Date;
 }) {
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`telegram-chat:${expected.chatId}`}, 0))`;
+  await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtextextended(${`telegram-chat:${expected.chatId}`}, 0))`;
   await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${expected.userId} FOR UPDATE`;
   const user = await tx.user.findUnique({ where: { id: expected.userId }, select: userSelection });
   const before = await tx.telegramLink.findUnique({ where: { userId: expected.userId } });
