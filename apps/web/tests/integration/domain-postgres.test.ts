@@ -765,7 +765,9 @@ test("draft/bootstrap-history-defaults-numbering-and-stage-promotion", async () 
   assert.equal((await tx.product.findUniqueOrThrow({ where: { id: deleted.id } })).status, "DRAFT");
   const afterRows = await tx.product.findMany({ where: { projectId: c.project.id }, orderBy: { id: "asc" } });
   const business = ({ status: _status, statusChangedAt: _changed, updatedAt: _updated, ...row }: typeof c.product) => { void _status; void _changed; void _updated; return row; };
-  assert.deepEqual(afterRows.map(business), before.map(business));
+  const expectedRows = before.map(row => ({ ...row, workflowRevision: row.workflowRevision + (row.id === c.product.id ? 1 : 0) }));
+  assert.deepEqual(afterRows.map(row => row.workflowRevision), expectedRows.map(row => row.workflowRevision));
+  assert.deepEqual(afterRows.map(business), expectedRows.map(business));
   assert.equal(await tx.productStatusHistory.count({ where: { productId: c.product.id } }), 1);
   assert.equal(await tx.productStatusHistory.count({ where: { productId: deleted.id, fromStatus: "DRAFT", toStatus: "PREPARATION" } }), 0);
   assert.equal(result.eventIds.length, 2);
