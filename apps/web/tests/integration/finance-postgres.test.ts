@@ -1593,6 +1593,34 @@ test("turnover/ten-real-commands-serialized-reread-rate-and-turnover", async () 
     assert.deepEqual(await fixture.db.payrollEntry.findUnique({ where: { id: original.id } }), original);
     assert.equal((await fixture.db.payrollEntry.aggregate({ where: { userId: c.employee.id }, _sum: { amount: true } }))._sum.amount!.toFixed(2), "600.00");
     assert.equal(await fixture.db.payrollEntry.count({ where: { userId: c.employee.id } }), 2);
-    assert.equal(await fixture.db.changeLog.count({ where: { actorId: c.actor.id } }), 2); assert.equal(await fixture.db.domainEvent.count({ where: { actor: c.actor.id } }), 2);
+    const replay = await turnover.accrueTurnoverCore(c.actor, "2000-01", coordinator.createMutationTransaction(fixture.peer));
+    assert.ok(replay.ok);
+    assert.deepEqual(replay.earnings, []);
+
+    const journal = await fixture.db.changeLog.findMany({ where: { actorId: c.actor.id, entity: "payrollEntry" } });
+    const roots = journal.filter(row => row.operationRootId === null);
+    const children = journal.filter(row => row.operationRootId !== null);
+    assert.equal(roots.length, 2);
+    assert.equal(children.length, 2);
+    for (const [entryId, action] of [[original.id, "accrue"], [result.earnings[0].payrollEntryId, "accrue-topup"]]) {
+      const child = children.find(row => row.entityId === entryId);
+      assert.ok(child);
+      assert.equal(child.action, action);
+      assert.equal(child.reversal, null);
+      const root = roots.find(row => row.id === child.operationRootId);
+      assert.ok(root);
+      assert.equal(root.action, "accrue");
+      assert.deepEqual(root.newValue, { month: "2000-01", payrollEntryIds: [entryId] });
+      const command = root.reversal as { kind: string; version: number; data: { entityId: string; sources: { id: string }[] } };
+      assert.equal(command.kind, "payroll.accrual");
+      assert.equal(command.version, 1);
+      assert.equal(command.data.entityId, root.entityId);
+      assert.deepEqual(command.data.sources.map(source => source.id), [entryId]);
+    }
+    const events = await fixture.db.domainEvent.findMany({ where: { actor: c.actor.id } });
+    assert.deepEqual(events.map(event => event.type), ["payroll.accrued", "payroll.accrued"]);
+    assert.deepEqual(events.map(event => (event.payload as { payrollEntryId: string }).payrollEntryId).sort(),
+      [original.id, result.earnings[0].payrollEntryId].sort());
+    assert.equal(await fixture.db.payrollEntry.count({ where: { userId: c.employee.id } }), 2);
   } finally { release.resolve(); await Promise.allSettled([held, ...(first ? [first] : [])]); }
 });
