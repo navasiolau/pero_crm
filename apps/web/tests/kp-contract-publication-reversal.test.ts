@@ -96,4 +96,3 @@ test("first combined publication reverts both project stages and promotion, keep
   assert.equal(assets.docx.deletedAt, null);
   assert.equal(history.length, 6);
 });
-
