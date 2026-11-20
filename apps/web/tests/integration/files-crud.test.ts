@@ -303,7 +303,7 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
 
     const journalAdmin = await f.user("document-journal-admin", ["ADMIN"]);
     const linkedPaymentId = f.id("retained-ordered-payment");
-    const request = { entryId: "finance-document:" + parallelId, requestId: randomUUID() };
+    const request = { entryId: "finance-document:" + parallelId, requestId: randomUUID(), scope: { kind: "global" } };
     await f.rollback(async tx => {
       await tx.payment.create({ data: { id: linkedPaymentId, projectId: project.id, cashAccountId: cash.id,
         expenseArticleId: article.id, createdById: accountant.id, direction: "EXPENSE", amount: "0.01",
@@ -321,7 +321,7 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
       await rejectedSql(tx, () => tx.payment.update({ where: { id: linkedPaymentId }, data: { deletedAt: null, deletedById: null } }));
       const preserved = await tx.paymentReportDocument.findMany({ where: { paymentId: linkedPaymentId }, orderBy: { position: "asc" } });
       assert.deepEqual(preserved.map(row => row.documentId), [docs[2].id, parallelId]);
-      await reverseJournalActionInTransaction(tx, journalAdmin.id, { entryId: reverse.reversalId, requestId: randomUUID() });
+      await reverseJournalActionInTransaction(tx, journalAdmin.id, { entryId: reverse.reversalId, requestId: randomUUID(), scope: request.scope });
       await tx.payment.update({ where: { id: linkedPaymentId }, data: { deletedAt: null, deletedById: null } });
       const restored = await journalService.read(accountant.id, parallelId);
       assert.ok(restored);
