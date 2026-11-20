@@ -53,7 +53,7 @@ COPY --from=build /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=build /app/apps/web/public ./apps/web/public
 COPY apps/web/prisma apps/web/prisma
 EXPOSE 3000
-COPY apps/web/runtime-start.sh apps/web/runtime-migrate.cjs apps/web/runtime-web.cjs apps/web/
+COPY apps/web/runtime-start.sh apps/web/runtime-migrate.mjs apps/web/runtime-web.mjs apps/web/
 RUN mkdir -p /app/apps/web/.next/cache /run/pero-crm \
     && chown node:node /app/apps/web/.next/cache \
     && chmod 0700 /run/pero-crm

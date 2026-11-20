@@ -1,4 +1,4 @@
-const { constants, accessSync, readFileSync } = require("node:fs");
+import { constants, accessSync, readFileSync } from "node:fs";
 
 function requireGuard(value) { if (!value) throw new Error("CRM runtime isolation refused"); }
 const status = readFileSync("/proc/self/status", "utf8");
@@ -18,4 +18,4 @@ try {
   requireGuard(error.code === "EACCES");
 }
 accessSync("/app/apps/web/.next/cache", constants.W_OK);
-require("./server.js");
+await import("./server.js");

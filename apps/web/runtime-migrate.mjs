@@ -1,7 +1,7 @@
-const { spawnSync } = require("node:child_process");
-const { constants, fstatSync, openSync, readFileSync, closeSync, statSync } = require("node:fs");
-const { lookup } = require("node:dns").promises;
-const { isIPv4 } = require("node:net");
+import { spawnSync } from "node:child_process";
+import { constants, fstatSync, openSync, readFileSync, closeSync, statSync } from "node:fs";
+import { lookup } from "node:dns/promises";
+import { isIPv4 } from "node:net";
 
 const secretPath = "/run/pero-crm/migrator.env";
 function requireGuard(value) { if (!value) throw new Error("CRM migration admission refused"); }
