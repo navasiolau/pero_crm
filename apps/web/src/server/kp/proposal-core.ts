@@ -207,7 +207,8 @@ export async function saveProposalInTransaction(tx: Prisma.TransactionClient, ac
   const submitted = normalizeProposalState(data.state);
   if (!hooks.restoreVersion) assertCurrentProposalEditor(proposal.state, submitted);
   const source = canonicalizeProposalSpecifications(submitted);
-  const selection = await resolveProposalClientInTransaction(tx, actor, data, source, project.clientId, hooks.environment, proposal.state,projectJournalContext(project));
+  const selection = await resolveProposalClientInTransaction(tx, actor, data, source, project.clientId,
+    hooks.environment, proposal.state, projectJournalContext(project), operationRootId);
   const values = projectValues(source, data.address);
   const state = canonicalState(bindProposalClient(source, selection.client, selection.isTemporary), { ...project, ...values });
   const projectChanged = project.title !== values.title || project.address !== values.address || project.clientId !== selection.client.id;

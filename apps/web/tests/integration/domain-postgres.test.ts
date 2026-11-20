@@ -832,10 +832,21 @@ test("kp254/native-first-save-creates-immutable-checkpoint-without-a-pdf", async
   assert.equal(await tx.proposalVersion.count({ where: { proposalId } }), 0);
   const saved = await proposals.saveProposalInTransaction(tx, actor, {
     proposalId, expectedRevision: created.revision, operationId: randomUUID(),
+    clientId: customer.id, clientSnapshot: { phone: "+375000000255" },
     state: { ...created.state, items: created.state.items.map(item => ({ ...item, name: "Вторая редакция", price: 150 })) },
   }, hooks);
   assert.equal(saved.result.revision, created.revision + 1);
   assert.ok(saved.undo);
+  assert.equal(saved.undo.clientEffect?.clientId, customer.id);
+  assert.equal(saved.undo.clientEffect?.command.kind, "office.directory");
+  const event = await tx.changeLog.findFirstOrThrow({ where: {
+    entity: "commercialProposal", entityId: proposalId, action: "update", operationRootId: null,
+  } });
+  const clientAudit = await tx.changeLog.findFirstOrThrow({ where: {
+    entity: "client", entityId: customer.id, action: "update", operationRootId: event.id,
+  } });
+  assert.equal(clientAudit.reversal, null);
+  assert.equal((await tx.client.findUniqueOrThrow({ where: { id: customer.id } })).phone, "+375000000255");
   const checkpoint = await tx.proposalVersion.findUniqueOrThrow({ where: { id: saved.undo.checkpointId } });
   assert.equal(checkpoint.trigger, "EDIT");
   assert.equal(checkpoint.pdfArtifactId, null);
