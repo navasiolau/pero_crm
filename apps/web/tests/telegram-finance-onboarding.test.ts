@@ -59,8 +59,8 @@ const prisma = {
 };
 const require = createRequire(import.meta.url);
 function inject(name: string, value: unknown) {
-  const file = require.resolve(name), module = new Module(file);
-  module.filename = file; module.loaded = true; module.exports = value; require.cache[file] = module;
+  const file = require.resolve(name), stub = new Module(file);
+  stub.filename = file; stub.loaded = true; stub.exports = value; require.cache[file] = stub;
 }
 inject("../src/lib/prisma", { prisma });
 inject("../src/auth", { auth: async () => null });
