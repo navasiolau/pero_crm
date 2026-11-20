@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 import datetime
 import json
+import ipaddress
 import os
 from pathlib import Path
 import re
@@ -16,6 +17,8 @@ import subprocess
 import sys
 import tempfile
 import time
+from urllib.parse import parse_qs, unquote, urlsplit
+import uuid
 
 
 IMAGE_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -24,6 +27,7 @@ REVISION_RE = re.compile(r"[0-9a-f]{40}\Z")
 DOCKER = ["docker", "--host", "unix:///var/run/docker.sock"]
 KP_REPOSITORY = "ghcr.io/navasiolau/pero_kp_renderer"
 WEB_REPOSITORY = "ghcr.io/navasiolau/pero_crm"
+WATCH_PIN_VARIABLES = {"CRM_WATCH_WEB_IMAGE", "CRM_WATCH_KP_IMAGE", "CRM_WATCH_SKIP_MIGRATION"}
 MIN_IMAGE_FREE_BYTES = 3 * 1024 ** 3
 MAX_IMAGE_REMOVALS = 20
 
@@ -111,6 +115,64 @@ def check_config(config: dict, target: Target) -> None:
 
 def kp_enabled(config: dict) -> bool:
     return str(config.get("services", {}).get("web", {}).get("environment", {}).get("PERO_KP_ENABLED", "0")) == "1"
+
+
+def container_environment(container: dict) -> dict:
+    return dict(value.split("=", 1) for value in container.get("Config", {}).get("Env", []) if "=" in value)
+
+
+def migration_enabled(config: dict, target: Target) -> bool:
+    env = config["services"]["web"].get("environment") or {}
+    if str(env.get("PERO_DB_MIGRATE_ON_START", "0")) != "1":
+        return False
+    require(target.project == "crm-staging" and str(env.get("PERO_DB_ENFORCE_RUNTIME")) == "1", "migration-mode-refused")
+    require(not any(env.get(key) for key in ("DATABASE_MIGRATION_URL", "DB_PASSWORD", "POSTGRES_PASSWORD",
+                                            "DIRECT_URL", "SHADOW_DATABASE_URL")), "migration-web-credentials")
+    require(str(env.get("PERO_DB_SKIP_MIGRATION", "0")) == "0", "migration-bypass-refused")
+    volumes = [mount for mount in config["services"]["web"].get("volumes", []) if mount.get("target") == "/run/pero-crm/migrator.env"]
+    require(len(volumes) == 1 and volumes[0].get("type") == "bind" and volumes[0].get("read_only") is True
+            and volumes[0].get("source") == target.directory + "/.pero-migrator.env"
+            and volumes[0].get("bind", {}).get("create_host_path") is False, "migration-mount-refused")
+    return True
+
+
+def migration_cutover_needed(web: dict, config: dict) -> bool:
+    actual = container_environment(web)
+    expected = config["services"]["web"].get("environment") or {}
+    return any(actual.get(key) != expected.get(key) for key in ("DATABASE_URL", "PERO_DB_ENFORCE_RUNTIME"))
+
+
+def migration_image(runtime, image: dict, current_id: str) -> str:
+    def ci_identity(candidate: dict) -> tuple[int, int]:
+        labels = candidate.get("Config", {}).get("Labels") or {}
+        require(bool(image_identity(candidate)[1]) and labels.get("pero.ci.repository") == "navasiolau/pero_crm"
+                and labels.get("pero.ci.service") == "web"
+                and all(isinstance(labels.get(key), str) and re.fullmatch(r"[1-9][0-9]*", labels[key])
+                        for key in ("pero.ci.run", "pero.ci.attempt")), "migration-image-ci-identity")
+        return int(labels["pero.ci.run"]), int(labels["pero.ci.attempt"])
+
+    wanted = image_identity(image)
+    issued = ci_identity(image)
+    require((image.get("Config", {}).get("Labels") or {}).get("pero.crm.runtime-init") == "1", "migration-image-runtime-init")
+    if wanted[0] != current_id:
+        previous = runtime.inspect_image_ref(current_id)
+        require(image_identity(previous)[0] == current_id and issued > ci_identity(previous), "migration-rollback-refused")
+    reference = immutable_ref(image, WEB_REPOSITORY)
+    require(image_identity(runtime.inspect_image_ref(reference)) == wanted, "migration-image-drift")
+    return reference
+
+
+def bound_database_url(value: str, expected_database: str) -> str:
+    try:
+        url = urlsplit(value)
+        role = unquote(url.username or "")
+        require(url.scheme in ("postgres", "postgresql") and url.hostname == "db" and url.port in (None, 5432)
+                and url.path == f"/{expected_database}" and bool(url.password) and not url.fragment
+                and parse_qs(url.query, keep_blank_values=True, strict_parsing=True) in ({}, {"schema": ["public"]})
+                and bool(re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_-]{0,62}", role)), "migration-database-url")
+    except (TypeError, ValueError, AttributeError):
+        raise WatchError("migration-database-url") from None
+    return role
 
 
 def immutable_ref(image: dict, repository: str) -> str:
@@ -393,6 +455,7 @@ def watch_pair(runtime, target: Target, config: dict, db_before: tuple, web: dic
                context: dict, health_timeout: float, poll_interval: float) -> dict:
     """Один lock, immutable images и image-only rollback; БД только перечитывается."""
     runtime.reserve_pair_rollback()
+    migrate = migration_enabled(config, target)
     renderer = runtime.inspect_optional_container(target, "kp-renderer")
     if renderer is not None:
         check_renderer_container(renderer, target, config)
@@ -451,7 +514,7 @@ def watch_pair(runtime, target: Target, config: dict, db_before: tuple, web: dic
             require(((current["Id"], current["Image"]) if current else None) == previous, "kp-container-drift")
         result = {"project": target.project, "image": binding["web_id"], "renderer": binding["renderer_id"],
                   "revision": binding["revision"], "web_ref": binding["web"], "renderer_ref": binding["kp-renderer"], "database": db_before[0]}
-        if old_ids == desired_ids:
+        if old_ids == desired_ids and not (migrate and migration_cutover_needed(web, config)):
             wait_healthy(desired_ids, health_timeout)
             unchanged = {**result, "status": "unchanged", "web": web["Id"], "health": "healthy"}
             return retention.finish(unchanged) if retention else unchanged
@@ -459,8 +522,18 @@ def watch_pair(runtime, target: Target, config: dict, db_before: tuple, web: dic
         require(image_identity(runtime.inspect_image(target))[0] == binding["web_id"], "image-tag-drift")
         require(image_identity(runtime.inspect_image_ref(binding["kp-renderer"]))[0] == binding["renderer_id"], "kp-renderer-drift")
         require(runtime.compose_config(target) == config, "compose-drift")
+        if migrate:
+            require(migration_image(runtime, desired_web, old_ids["web"]) == binding["web"], "migration-image-drift")
+            runtime.migrate_web(target, config, db_before, binding["web"], binding["web_id"])
+            context["migration"] = result["migration"] = "applied"
+            database_check()
+            require(runtime.compose_config(target) == config, "compose-drift")
         changed = True
-        runtime.up_pair(target, {"web": binding["web"], "kp-renderer": binding["kp-renderer"]})
+        references = {"web": binding["web"], "kp-renderer": binding["kp-renderer"]}
+        if migrate:
+            runtime.up_stable_pin(target, references)
+        else:
+            runtime.up_pair(target, references)
         deployed = wait_healthy(desired_ids, health_timeout)
         require(runtime.compose_config(target) == config, "compose-drift")
         completed = {**result, "status": "deployed", "health": "healthy", "web": deployed["web"]["Id"]}
@@ -477,7 +550,13 @@ def watch_pair(runtime, target: Target, config: dict, db_before: tuple, web: dic
                     check_container(current, target, service, require_running=False)
                     require(current["Image"] in (old_ids[service], image), "kp-rollback-image-drift")
             try:
-                runtime.up_pair(target, old_ids)
+                if migrate:
+                    labels = runtime.inspect_image_ref(old_ids["web"]).get("Config", {}).get("Labels") or {}
+                    require(labels.get("pero.crm.runtime-init") == "1" and not migration_cutover_needed(web, config),
+                            "migration-rollback-requires-original-config")
+                    runtime.up_stable_pin(target, old_ids, skip_migration=True)
+                else:
+                    runtime.up_pair(target, old_ids)
                 if old_ids["kp-renderer"] is None:
                     runtime.remove_created_renderer(target, desired_ids["kp-renderer"], config)
                 restored = wait_healthy(old_ids, min(30, health_timeout))
@@ -517,6 +596,7 @@ def _watch(runtime, context: dict, health_timeout: float, poll_interval: float) 
             return {"status": "busy", "project": target.project}
         config = runtime.compose_config(target)
         check_config(config, target)
+        migrate = migration_enabled(config, target)
         db_before = database_snapshot(runtime.inspect_container(target, "db"), target, config)
         web = runtime.inspect_container(target, "web")
         check_container(web, target, "web")
@@ -539,7 +619,8 @@ def _watch(runtime, context: dict, health_timeout: float, poll_interval: float) 
                 raise
         # Никакого up при ошибке pull, даже если новый образ уже есть в кеше.
         runtime.pull(target)
-        desired, revision = image_identity(runtime.inspect_image(target))
+        desired_image = runtime.inspect_image(target)
+        desired, revision = image_identity(desired_image)
         context.update(image=desired, revision=revision)
         require(runtime.compose_config(target) == config, "compose-drift")
         check_database()
@@ -548,7 +629,7 @@ def _watch(runtime, context: dict, health_timeout: float, poll_interval: float) 
         context.update(web=web["Id"], health=health_status(web))
         result = {"project": target.project, "image": desired, "revision": revision,
                   "database": db_before[0]}
-        if web["Image"] == desired:
+        if web["Image"] == desired and not (migrate and migration_cutover_needed(web, config)):
             require(health_status(web) == "healthy", "web-unhealthy")
             unchanged = {**result, "status": "unchanged", "web": web["Id"], "health": "healthy"}
             if not retention:
@@ -563,7 +644,15 @@ def _watch(runtime, context: dict, health_timeout: float, poll_interval: float) 
         # Повторный pull и запуск зависимостей запрещены. При любой ошибке up/health
         # БД только перечитывается; никаких автоматических restore или down.
         try:
-            runtime.up(target)
+            if migrate:
+                reference = migration_image(runtime, desired_image, web["Image"])
+                runtime.migrate_web(target, config, db_before, reference, desired)
+                context["migration"] = result["migration"] = "applied"
+                check_database()
+                require(runtime.compose_config(target) == config, "compose-drift")
+                runtime.up_stable_pin(target, {"web": reference})
+            else:
+                runtime.up(target)
             deadline = runtime.monotonic() + health_timeout
             while True:
                 remaining = deadline - runtime.monotonic()
@@ -691,7 +780,7 @@ class DockerRuntime:
             os.close(descriptor)
 
     def command(self, args: list[str], operation: str, *, timeout: float = 30,
-                directory: str | None = None) -> str:
+                directory: str | None = None, overrides: dict | None = None) -> str:
         if self.deadline is not None:
             # До 5 секунд на SIGKILL/reap входят в общий лимит. Последние 15
             # секунд принадлежат postcheck, а не pull/up/health.
@@ -703,6 +792,11 @@ class DockerRuntime:
                     "COMPOSE_FILE", "COMPOSE_PROJECT_NAME", "COMPOSE_PROFILES", "COMPOSE_ENV_FILES",
                     "COMPOSE_DISABLE_ENV_FILE"):
             env.pop(key, None)
+        for key in WATCH_PIN_VARIABLES:
+            env.pop(key, None)
+        if overrides:
+            require(set(overrides) <= WATCH_PIN_VARIABLES, "migration-pin-variables")
+            env.update(overrides)
         try:
             process = subprocess.Popen(args, cwd=directory, env=env, stdin=subprocess.DEVNULL,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -738,7 +832,7 @@ class DockerRuntime:
         ResultJournal().record(result)
 
     def compose(self, target: Target, args: list[str], operation: str, *, timeout: float = 30,
-                paired: bool | None = None, pin_file: Path | None = None) -> str:
+                paired: bool | None = None, pin_file: Path | None = None, overrides: dict | None = None) -> str:
         base = Path(target.directory)
         # Явные файлы исключают поиск Compose в родительском каталоге и влияние
         # COMPOSE_FILE; существующий стандартный override обязательно сохраняется.
@@ -753,14 +847,14 @@ class DockerRuntime:
         if use_kp:
             files.append(base / "docker-compose.kp.yml")
         if pin_file is not None:
-            require(use_kp and pin_file.parent == base and pin_file.name.startswith(".pero-kp-images-"), "kp-pin-file-path")
+            require(pin_file.parent == base and pin_file.name.startswith(".pero-kp-images-"), "kp-pin-file-path")
             files.append(pin_file)
         for path in files:
             require(path.is_file() and not path.is_symlink(), "unsafe-compose-file")
         flags = [part for path in files for part in ("-f", str(path))]
         command = DOCKER + ["compose", "--project-directory", target.directory,
                             "--project-name", target.project] + (["--profile", "kp"] if use_kp else []) + flags + args
-        return self.command(command, operation, timeout=timeout, directory=target.directory)
+        return self.command(command, operation, timeout=timeout, directory=target.directory, **({"overrides": overrides} if overrides else {}))
 
     def compose_config(self, target: Target) -> dict:
         # В выключенном режиме выполняется тот же один config и прежние команды.
@@ -828,6 +922,27 @@ class DockerRuntime:
                     and (current.st_dev, current.st_ino) == (created.st_dev, created.st_ino), "kp-pin-file-drift")
             temporary.unlink()  # Только собственный exact-path override, не конфигурация сервера.
 
+    def up_stable_pin(self, target: Target, references: dict, *, skip_migration: bool = False) -> None:
+        require(target.project == "crm-staging" and {"web"} <= set(references) <= {"web", "kp-renderer"},
+                "migration-pin-target")
+        replacements = {}
+        for service, repository, key in (("web", WEB_REPOSITORY, "CRM_WATCH_WEB_IMAGE"),
+                                         ("kp-renderer", KP_REPOSITORY, "CRM_WATCH_KP_IMAGE")):
+            reference = references.get(service)
+            if reference is None:
+                continue
+            require(bool(IMAGE_RE.fullmatch(reference)) or bool(re.fullmatch(re.escape(repository) + r"@sha256:[0-9a-f]{64}", reference)),
+                    "migration-pin-reference")
+            replacements[key] = reference
+        replacements["CRM_WATCH_SKIP_MIGRATION"] = "1" if skip_migration else "0"
+        config = json.loads(self.compose(target, ["config", "--format", "json"], "migration-pin-config", overrides=replacements))
+        services = config.get("services", {})
+        require(all(services.get(key, {}).get("image") == value for key, value in references.items() if value is not None)
+                and str(services.get("web", {}).get("environment", {}).get("PERO_DB_SKIP_MIGRATION")) == replacements["CRM_WATCH_SKIP_MIGRATION"],
+                "migration-pin-config-refused")
+        self.compose(target, ["up", "-d", "--no-deps", "--no-build", "--pull", "never", *[key for key, value in references.items() if value]],
+                     "migration-pinned-up", timeout=60, overrides=replacements)
+
     def remove_created_renderer(self, target: Target, image: str, config: dict) -> None:
         current = self.inspect_optional_container(target, "kp-renderer")
         if current is None:
@@ -835,6 +950,111 @@ class DockerRuntime:
         check_renderer_container(current, target, config, allow_stopped=True)
         require(current["Image"] == image, "kp-created-renderer-drift")
         self.command(DOCKER + ["rm", "--force", current["Id"]], "kp-created-renderer-remove")
+
+    def migration_target(self, target: Target, config: dict, db: dict) -> tuple[str, str, str, str, str]:
+        db_config = config["services"]["db"]
+        declared = db_config.get("networks") or {}
+        require(len(declared) == 1, "migration-network-config")
+        key = next(iter(declared))
+        network = config.get("networks", {}).get(key, {})
+        name = network.get("name")
+        require(isinstance(name, str) and name and network.get("internal") is True
+                and key in config["services"]["web"].get("networks", {}), "migration-network-config")
+        endpoint = db.get("NetworkSettings", {}).get("Networks", {}).get(name) or {}
+        network_id, address = endpoint.get("NetworkID", ""), endpoint.get("IPAddress", "")
+        try:
+            address = str(ipaddress.IPv4Address(address))
+        except ValueError:
+            raise WatchError("migration-database-address") from None
+        require(bool(CONTAINER_RE.fullmatch(network_id)) and "db" in (endpoint.get("Aliases") or []), "migration-database-network")
+        inspected = json.loads(self.command(DOCKER + ["network", "inspect", network_id], "migration-network-inspect", timeout=10))
+        require(isinstance(inspected, list) and len(inspected) == 1, "migration-network-identity")
+        actual = inspected[0]
+        labels = actual.get("Labels") or {}
+        member = (actual.get("Containers") or {}).get(db["Id"], {})
+        require(actual.get("Id") == network_id and actual.get("Name") == name and actual.get("Internal") is True
+                and labels.get("com.docker.compose.project") == target.project
+                and labels.get("com.docker.compose.network") == key
+                and member.get("Name") == f"{target.project}-db-1"
+                and str(member.get("IPv4Address", "")).split("/", 1)[0] == address, "migration-network-identity")
+        declared_env = db_config.get("environment") or {}
+        current_env = container_environment(db)
+        database, role = declared_env.get("POSTGRES_DB"), declared_env.get("POSTGRES_USER")
+        require(all(isinstance(value, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,62}", value) for value in (database, role))
+                and current_env.get("POSTGRES_DB") == database and current_env.get("POSTGRES_USER") == role, "migration-database-identity")
+        web_env = config["services"]["web"].get("environment", {})
+        require(database == "crm" and web_env.get("PERO_DB_MIGRATION_DATABASE") == database and web_env.get("PERO_DB_MIGRATOR_ROLE") == role, "migration-role-mismatch")
+        web_role = bound_database_url(web_env.get("DATABASE_URL"), database)
+        require(web_role != role, "migration-web-role-is-owner")
+        return network_id, name, address, database, role
+
+    def migration_credentials(self, target: Target) -> Path:
+        base = Path(target.directory)
+        info = base.lstat()
+        require(base.resolve() == base and stat.S_ISDIR(info.st_mode) and info.st_uid == 0
+                and not (stat.S_IMODE(info.st_mode) & 0o022), "migration-directory-unsafe")
+        path = base / ".pero-migrator.env"
+        try:
+            info = path.lstat()
+        except OSError:
+            raise WatchError("migration-env-unsafe") from None
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == info.st_gid == 0 and info.st_nlink == 1
+                and stat.S_IMODE(info.st_mode) == 0o400 and 0 < info.st_size <= 4096, "migration-env-unsafe")
+        return path
+
+    def cleanup_migrator(self, name: str, nonce: str, image: str, network_name: str, network_id: str) -> None:
+        ids = self.command(DOCKER + ["ps", "--all", "--no-trunc", "--quiet", "--filter", f"name=^/{name}$"],
+                           "migration-container-find", timeout=4).split()
+        if not ids:
+            return
+        require(len(ids) == 1 and bool(CONTAINER_RE.fullmatch(ids[0])), "migration-container-identity")
+        checked = json.loads(self.command(DOCKER + ["inspect", "--type", "container", ids[0]], "migration-container-inspect", timeout=4))
+        require(isinstance(checked, list) and len(checked) == 1, "migration-container-identity")
+        value = checked[0]
+        endpoint = value.get("NetworkSettings", {}).get("Networks", {})
+        require(value.get("Id") == ids[0] and value.get("Name") == f"/{name}" and value.get("Image") == image
+                and value.get("Config", {}).get("Labels", {}).get("pero.crm.migration") == nonce
+                and value.get("HostConfig", {}).get("NetworkMode") == network_id
+                and (not endpoint or (set(endpoint) == {network_name} and endpoint[network_name].get("NetworkID") in ("", network_id)))
+                and len(value.get("Mounts", [])) == 1
+                and value["Mounts"][0].get("Destination") == "/run/pero-crm/migrator.env"
+                and value["Mounts"][0].get("RW") is False, "migration-container-identity")
+        self.command(DOCKER + ["rm", "--force", ids[0]], "migration-container-remove", timeout=5)
+
+    def migrate_web(self, target: Target, config: dict, expected_db: tuple, reference: str, image: str) -> None:
+        require(migration_enabled(config, target), "migration-mode-refused")
+        require(image_identity(self.inspect_image_ref(reference))[0] == image, "migration-image-drift")
+        db = self.inspect_container(target, "db")
+        require(database_snapshot(db, target, config) == expected_db, "database-drift")
+        network_id, network_name, address, database, role = self.migration_target(target, config, db)
+        credentials = self.migration_credentials(target)
+        nonce = uuid.uuid4().hex
+        name = f"{target.project}-migrate-{nonce}"
+        reserve = self.postcheck_reserve
+        try:
+            self.postcheck_reserve = reserve + 18
+            container_id = self.command(DOCKER + ["create", "--pull", "never", "--name", name,
+                "--label", f"pero.crm.migration={nonce}", "--network", network_id, "--add-host", f"db:{address}",
+                "--log-driver", "none", "--no-healthcheck", "--security-opt", "no-new-privileges", "--entrypoint", "node",
+                "--mount", f"type=bind,source={credentials},target=/run/pero-crm/migrator.env,readonly",
+                "--env", "PERO_DB_ENFORCE_RUNTIME=1", "--env", "PERO_DB_MIGRATE_ON_START=1",
+                "--env", f"DATABASE_URL={self.non_secret_runtime_url(config, database)}",
+                "--env", f"PERO_DB_MIGRATOR_ROLE={role}", "--env", f"PERO_DB_MIGRATION_DATABASE={database}",
+                "--env", f"PERO_MIGRATION_EXPECTED_DB_IP={address}",
+                reference, "apps/web/runtime-migrate.cjs"], "migration-container-create", timeout=20).strip()
+            require(bool(CONTAINER_RE.fullmatch(container_id)), "migration-container-identity")
+            self.command(DOCKER + ["start", "--attach", container_id], "migration-deploy", timeout=80)
+            exit_code = self.command(DOCKER + ["inspect", "--format", "{{.State.ExitCode}}", "--type", "container", container_id],
+                                     "migration-exit-status", timeout=5).strip()
+            require(exit_code == "0", "migration-deploy-failed")
+        finally:
+            self.postcheck_reserve = reserve
+            self.cleanup_migrator(name, nonce, image, network_name, network_id)
+
+    @staticmethod
+    def non_secret_runtime_url(config: dict, database: str) -> str:
+        role = bound_database_url(config["services"]["web"]["environment"]["DATABASE_URL"], database)
+        return f"postgresql://{role}:not-used@db:5432/{database}"
 
     def pull(self, target: Target) -> None:
         self.compose(target, ["pull", "web"], "pull", timeout=180)

@@ -13,7 +13,7 @@ services:
   kp-renderer:
     profiles: [kp]
     # Только discovery; watcher всегда подставляет digest из проверенного web OCI.
-    image: ghcr.io/navasiolau/pero_kp_renderer:${CRM_IMAGE_TAG:-main}
+    image: ${CRM_WATCH_KP_IMAGE:-ghcr.io/navasiolau/pero_kp_renderer:${CRM_IMAGE_TAG:-main}}
     restart: unless-stopped
     init: true
     environment:
