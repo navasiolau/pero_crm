@@ -99,7 +99,7 @@ test("cash/journal-preserves-payout-and-restores-the-original-advance-with-its-c
     const request = { entryId: hidden.lastActionId!, requestId: randomUUID(), scope: { kind: "global" } };
     await assert.rejects(reverseJournalActionInTransaction(tx, admin.id, request), /Недостаточно средств в выбранной кассе/);
     assert.ok((await tx.payout.findUniqueOrThrow({ where: { id: issued.payoutId } })).deletedAt);
-    await tx.payment.update({ where: { id: expense.id }, data: { deletedAt: new Date() } });
+    await tx.payment.update({ where: { id: expense.id }, data: { deletedAt: new Date(), deletedById: admin.id } });
     await reverseJournalActionInTransaction(tx, admin.id, request);
     assert.deepEqual(await tx.payout.findUnique({ where: { id: issued.payoutId } }), before);
     assert.equal((await cash.readCashBalance(tx, c.account.id)).toFixed(2), "0.00");
