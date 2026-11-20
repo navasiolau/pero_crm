@@ -23,11 +23,15 @@ function fixture() {
 
 test("separate finance session owns expense preferences while ordinary sections keep web identity", async () => {
   const f = fixture();
+  const auditSources: string[] = [];
   const service = createListPreferenceService({
-    sessionUser: async section => section === "organizationExpenses" ? "mini-app" : "web",
+    sessionUser: async section => section === "organizationExpenses"
+      ? { id: "mini-app", name: "Сотрудник Telegram", source: "telegram" }
+      : { id: "web", name: "Сотрудник CRM", source: "web" },
     store: {
       get: async (user, key) => f.rows.get(user + "/" + key) ?? null,
-      compareAndSwap: async (user, key, expected, value) => {
+      compareAndSwap: async (user, key, expected, value, actor) => {
+        auditSources.push(actor.source);
         const name = user + "/" + key;
         if ((f.rows.get(name) ?? null) !== expected) return false;
         f.rows.set(name, value);
@@ -40,6 +44,7 @@ test("separate finance session owns expense preferences while ordinary sections 
   await service.save("products", "q=Кухня", null);
   assert.ok(f.rows.has("mini-app/organizationExpenses.list"));
   assert.ok(f.rows.has("web/products.list"));
+  assert.deepEqual(auditSources, ["telegram", "web"]);
   assert.equal((await service.load("organizationExpenses", {})).query, "view=table&pageSize=all");
 });
 

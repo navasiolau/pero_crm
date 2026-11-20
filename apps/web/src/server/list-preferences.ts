@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { auth } from "@/auth";
 import { financeSessionSource, scopedFinanceAuth } from "@/server/telegram/finance-session";
 import { prisma } from "@/lib/prisma";
-import { scopedFinanceAuth } from "@/server/telegram/finance-session";
 import { createListPreferenceService } from "./list-preference-service";
 import { createPrismaListPreferenceStore } from "./list-preference-store";
 
