@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useState } from "react";
+import { createContext, useContext, useState } from "react";
 import { Download, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -12,6 +12,12 @@ import { cn } from "@/lib/utils";
 export { getViewableFileSource, type ViewableFile } from "@/lib/viewable-file";
 export type FileViewerVariant = "standard" | "cover-fullscreen" | "fullscreen";
 export type FileNameTone = "default" | "red";
+
+const TelegramPdfPreview = createContext(false);
+
+export function TelegramFileViewerScope({ children }: { children: React.ReactNode }) {
+  return <TelegramPdfPreview.Provider value={true}>{children}</TelegramPdfPreview.Provider>;
+}
 export function getFileViewerPresentation(variant: FileViewerVariant = "standard", file?: Pick<ViewableFile,"mimeType">) {
   const image=file ? file.mimeType.startsWith("image/") : variant === "cover-fullscreen";
   return image||variant==='fullscreen'
@@ -58,12 +64,15 @@ export function FileViewer({file,open,onOpenChange,variant="standard",filenameTo
 }
 export function useFileViewer(variant: FileViewerVariant="standard", filenameTone: FileNameTone="default") {
   const [file,setFile]=useState<ViewableFile|null>(null);
+  const telegram = useContext(TelegramPdfPreview);
+  const previewsProtectedPdf = (file: ViewableFile) =>
+    telegram && isPdf(file) && (file.source === "finance" || file.source === "logistics");
   function open(file: ViewableFile) {
     const dispatch=getFileViewerDispatch(file);
-    if (variant==='fullscreen'||dispatch==="image"||dispatch==="video") setFile(file);
+    if (variant==='fullscreen'||previewsProtectedPdf(file)||dispatch==="image"||dispatch==="video") setFile(file);
     else if (dispatch==="pdf") window.open(`${getViewableFileSource(file)}?view=1`,"_blank","noopener");
     else { const anchor=document.createElement("a"); anchor.href=getViewableFileSource(file); anchor.download=file.fileName; anchor.click(); }
   }
-  const viewer=<FileViewer file={file} open={!!file} variant={variant} filenameTone={filenameTone} onOpenChange={open=>!open&&setFile(null)} />;
-  return {open,viewer};
+  const viewer=<FileViewer file={file} open={!!file} variant={file && previewsProtectedPdf(file) ? "fullscreen" : variant} filenameTone={filenameTone} onOpenChange={open=>!open&&setFile(null)} />;
+  return {open,viewer,previewsProtectedPdf};
 }
