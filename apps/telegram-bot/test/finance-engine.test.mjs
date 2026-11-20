@@ -5,7 +5,7 @@ import {randomUUID} from 'node:crypto';
 process.env.BOT_RECOVERY_TEST='1';process.env.TELEGRAM_API_ORIGIN='http://127.0.0.1:9080';
 process.env.TELEGRAM_BOT_TOKEN='fixture-token';process.env.CRM_BASE_URL='http://127.0.0.1:9081';process.env.CRM_API_TOKEN='fixture-crm-token';
 process.env.PERO_TELEGRAM_FINANCE_ORIGIN='https://crm.invalid';
-const sent=[],calls=[],uploads=new Map(),payments=new Map(),roles=new Map(),bindings=new Map();
+const sent=[],calls=[],uploads=new Map(),payments=new Map(),roles=new Map(),bindings=new Map(),unlinked=new Set();
 let loseUpload=false,losePayment=false,unknownPayment=false;
 globalThis.fetch=async(input,options={})=>{
  const url=new URL(String(input));
@@ -18,7 +18,7 @@ globalThis.fetch=async(input,options={})=>{
  else if(url.pathname.endsWith('/answerCallbackQuery'))result={ok:true,result:true};
  else if(url.pathname.endsWith('/getFile'))result={ok:true,result:{file_path:'documents/file.pdf',file_size:4}};
  else if(url.pathname.startsWith('/file/'))return new Response('%PDF',{headers:{'content-length':'4'}});
- else if(url.pathname==='/api/v1/bot/session'){const id=url.searchParams.get('chatId');result={ok:true,found:true,binding:bindings.get(id),user:{id:'actor-'+id,name:'Actor',roles:roles.get(id)??['PROCUREMENT'],botAllowed:true}};}
+ else if(url.pathname==='/api/v1/bot/session'){const id=url.searchParams.get('chatId');result=unlinked.has(id)?{ok:true,found:false}:{ok:true,found:true,binding:bindings.get(id),user:{id:'actor-'+id,name:'Actor',roles:roles.get(id)??['PROCUREMENT'],botAllowed:true}};}
  else if(url.pathname==='/api/v1/bot/projects'){
   const q=url.searchParams.get('q');
   result={ok:true,projects:q==='Шкаф'?[{id:'older',number:'204',title:'Шкаф в холл',currency:'BYN'},{id:'newer',number:'206',title:'Шкаф в спальню',currency:'BYN'}]:[{id:'project',number:'205',title:'Order',currency:'BYN'}]};
@@ -239,4 +239,16 @@ test('native bot rejects callbacks from an older binding even for the same CRM a
  const second=latestButton(chat,'paygeneral:');assert.notEqual(second,first);
  await handleUpdate(boundCallback(second,sent.length));
  assert.match(sent.at(-1).text,/Сумма/);
+});
+
+
+test('unlinked private chat gets only the safe Finance onboarding button', async () => {
+ const chat=8842;unlinked.add(String(chat));
+ await handleUpdate(message(chat,'/start'));
+ assert.deepEqual(sent.at(-1).reply_markup.inline_keyboard[0][0],{text:'Подключить финансы',web_app:{url:'https://crm.invalid/telegram/finance'}});
+ assert.doesNotMatch(sent.at(-1).text,/платёж|Actor/);
+ const before=sent.length;
+ await handleUpdate(message(chat,'/проекты'));
+ await handleUpdate(message(-chat,'/start',{from:{id:chat}}));
+ assert.equal(sent.length,before);
 });

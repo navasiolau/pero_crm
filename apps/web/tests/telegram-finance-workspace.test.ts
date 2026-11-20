@@ -66,7 +66,7 @@ inject("../src/lib/prisma", { prisma: { telegramLink: { findUnique: async ({ whe
   lookups++;
   assert.equal(where.chatId, String(user.id));
   return linked ? activeLink : null;
-} } } });
+} }, telegramFinanceBinding: { createMany: async () => ({ count: 1 }) } } });
 inject("../src/auth", { auth: async (request?: NextRequest) => request ? Response.redirect(origin + "/login") : null });
 const { POST } = require("../src/app/api/telegram/finance/session/route") as typeof import("../src/app/api/telegram/finance/session/route");
 const { resolveTelegramFinanceSession } = require("../src/server/telegram/finance-session") as typeof import("../src/server/telegram/finance-session");
@@ -105,5 +105,8 @@ test("entry verifies before lookup, sets only scoped cookie, and revocation is i
   assert.equal((await POST(request(signed()))).status, 403);
   linked = false;
   assert.equal(await resolveTelegramFinanceSession(cookie), null);
-  assert.equal((await POST(request(signed()))).status, 403);
+  const unbound = await POST(request(signed()));
+  assert.equal(unbound.status, 409);
+  assert.deepEqual(await unbound.json(), { ok: false, code: "LINK_REQUIRED" });
+  assert.equal(unbound.cookies.get(TELEGRAM_FINANCE_COOKIE), undefined);
 });
