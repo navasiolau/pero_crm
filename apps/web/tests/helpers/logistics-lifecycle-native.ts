@@ -97,11 +97,11 @@ export async function verifyLogisticsLifecycleNative(tx: Prisma.TransactionClien
     clientMutationId: correctionId, amount: "12.00", currency: "BYN", cashAccountId: other.id,
     documentIds: [documentId], manifest: single }, "correct", { db: tx, transaction });
   const undoCorrection = `logistics-posting:${correctionId}`;
-  await tx.payment.update({ where: { id: income.id }, data: { deletedAt: new Date() } });
+  await tx.payment.update({ where: { id: income.id }, data: { deletedAt: new Date(), deletedById: admin.id } });
   await assert.rejects(() => previewJournalReversalInTransaction(tx, director.id, { entryId: undoCorrection, scope: { kind: "global" } }), /отрицательный остаток кассы/);
   await assert.rejects(() => undo(undoCorrection), /отрицательный остаток кассы/);
   assert.equal((await getLogisticsTripMoneyCore(director.id, trip.tripId, tx)).current?.amount, "12.00");
-  await tx.payment.update({ where: { id: income.id }, data: { deletedAt: null } });
+  await tx.payment.update({ where: { id: income.id }, data: { deletedAt: null, deletedById: null } });
   const requestId = randomUUID();
   const reversal = await undo(undoCorrection, requestId);
   assert.equal((await undo(undoCorrection, requestId)).reversalId, reversal.reversalId);
