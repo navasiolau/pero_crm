@@ -85,7 +85,7 @@ jobs:
           files=()
           for file in apps/web/tests/*.test.ts apps/web/tests/*.test.mjs; do
             case "${file##*/}" in
-              inline-expense-article-component.test.mjs|telegram-finance-entry-component.test.mjs)
+              inline-expense-article-component.test.mjs|telegram-finance-entry-component.test.mjs|telegram-pdf-viewer-component.test.mjs)
                 cohort=components-0 ;;
               inline-material-component.test.mjs|organization-expense-browser.test.mjs)
                 cohort=components-1 ;;
