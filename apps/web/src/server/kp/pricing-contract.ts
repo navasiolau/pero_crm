@@ -34,3 +34,12 @@ export function fixedProposalRate(input: ProposalFixedRateInput, currency: Propo
   if (input.source !== "NBRB" && input.source !== "MANUAL") throw Error("Укажите источник курса КП");
   return { currency, value, date: proposalRateDate(input.date), source: input.source };
 }
+
+export const rateDto = (rate: ProposalFixedRate) => ({ currency: rate.currency, rate: rate.value.toString(), date: rate.date, source: rate.source });
+
+export type StoredRate = { currency: string; rate: { toString(): string } | string | null; rateDate: Date | string | null; rateSource: string | null };
+export function storedKpRate(value: StoredRate): ProposalFixedRate | null {
+  if (value.rate === null || value.rateDate === null || value.rateSource === null) return null;
+  try { return fixedProposalRate({ currency: value.currency, value: value.rate.toString(), date: value.rateDate, source: value.rateSource }, proposalCurrency(value.currency)); }
+  catch { return null; }
+}

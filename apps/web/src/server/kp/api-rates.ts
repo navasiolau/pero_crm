@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { apiFailure, apiRateQuery, parseApi, type KpApiContext } from "./api-contract";
-import { fixedProposalRate, proposalCurrency, type ProposalFixedRate } from "./pricing-contract";
+import { fixedProposalRate, type ProposalFixedRate } from "./pricing-contract";
 
 export function proposalSourceDate(state: unknown): string | null {
   if (!state || typeof state !== "object" || Array.isArray(state) || !("order" in state)) return null;
@@ -15,7 +15,6 @@ export function moscowDate(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Moscow", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
   return ["year", "month", "day"].map(type => parts.find(part => part.type === type)!.value).join("-");
 }
-export const rateDto = (rate: ProposalFixedRate) => ({ currency: rate.currency, rate: rate.value.toString(), date: rate.date, source: rate.source });
 
 /** НБРБ вызывается до SQL mutation; ни курс, ни дата не подменяются текущими при ошибке. */
 export async function fetchKpNbrbRate(context: KpApiContext, input: unknown, fetcher: typeof fetch = fetch): Promise<ProposalFixedRate> {
@@ -45,9 +44,4 @@ export async function fetchKpNbrbRate(context: KpApiContext, input: unknown, fet
   return fixedProposalRate({ currency, value: new Prisma.Decimal(String(result.Cur_OfficialRate)).div(result.Cur_Scale).toDecimalPlaces(10), date, source: "NBRB" }, currency);
 }
 
-export type StoredRate = { currency: string; rate: { toString(): string } | string | null; rateDate: Date | string | null; rateSource: string | null };
-export function storedKpRate(value: StoredRate): ProposalFixedRate | null {
-  if (value.rate === null || value.rateDate === null || value.rateSource === null) return null;
-  try { return fixedProposalRate({ currency: value.currency, value: value.rate.toString(), date: value.rateDate, source: value.rateSource }, proposalCurrency(value.currency)); }
-  catch { return null; }
-}
+export { rateDto, storedKpRate, type StoredRate } from "./pricing-contract";

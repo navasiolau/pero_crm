@@ -14,12 +14,10 @@ import { revalidateProductPaths } from "@/server/products/revalidate";
 import { revalidatePath } from "next/cache";
 import { apiFailure, apiId, apiOperationId, parseApi, type KpApiContext } from "./api-contract";
 import { bindProposalClient, proposalClientLabel, proposalClientSnapshot, proposalTemporaryClientId } from "./proposal-client";
-import { createProposalInTransaction, saveProposalInTransaction, type ProposalSaveHooks, type ProposalWriteMutation } from "./proposal-core";
+import { createProposalInTransaction, saveProposalInTransaction, type ProposalWriteMutation } from "./proposal-core";
 import { assertCurrentProposalEditor, normalizeProposalState, proposalObject, type ProposalState } from "./proposal-contract";
-import { projectProposalPricing } from "./pricing";
-import { applyProjectionInTransaction } from "./pricing-persistence";
 import { fixedProposalRate, proposalCurrency, type ProposalFixedRate } from "./pricing-contract";
-import { createProposalMediaHooks } from "./media-product-sync";
+import { createProposalSaveHooks } from "./save-hooks";
 import { prepareProposalProductMedia, uploadProposalImage, readProposalMedia } from "./media-core";
 import { createPrismaProposalMediaRepository } from "./media-repository";
 import { createProposalMediaS3Storage } from "./media-storage";
@@ -126,41 +124,13 @@ async function chooseRate(context: KpApiContext, state: ProposalState, input: Re
   if (!date) return apiFailure("KP_DATE_REQUIRED", 400, "Укажите дату КП");
   return fetchKpNbrbRate(context, { currency, date });
 }
-const moneyEqual = (left: unknown, right: unknown) => left == null || right == null ? left == null && right == null : new Prisma.Decimal(String(left)).eq(String(right));
 function pricingInput<T>(run: () => T): T {
   try { return run(); }
   catch (error) { return apiFailure("KP_PRICING_INVALID", 400, error instanceof Error ? error.message : "Проверьте цены и курс КП"); }
 }
-export function createApiSaveHooks(fx: ProposalFixedRate, preparedCopies?: PreparedProductMedia): ProposalSaveHooks {
-  const media = createProposalMediaHooks({ storage: createProposalMediaS3Storage(), preparedCopies });
-  return {
-    pricingFingerprint: apiDigest(rateDto(fx)), journalCheckpoints: true, applyMedia: media.applyMedia,
-    async applyPricing(tx, context) {
-      const projection = pricingInput(() => projectProposalPricing(context.state, fx));
-      const currentProject = await tx.project.findUniqueOrThrow({ where: { id: context.project.id } });
-      const products = await tx.product.findMany({ where: { projectId: context.project.id, deletedAt: null } });
-      const links = new Map(context.items.map(item => [item.id, item]));
-      if (products.length !== projection.items.length || context.items.length !== projection.items.length) return apiFailure("KP_COMPOSITION_CHANGED", 409, "Изменился состав КП");
-      const changedPools: string[] = [];
-      let productsChanged = false;
-      for (const item of projection.items) {
-        const link = links.get(item.id), actual = products.find(product => product.id === link?.productId);
-        if (!actual || actual.quantity !== item.quantity) return apiFailure("KP_COMPOSITION_CHANGED", 409, "Изменился состав КП");
-        if (!moneyEqual(actual.expectedPrice, item.expectedPrice) || link?.previousQuantity != null && link.previousQuantity !== item.quantity) changedPools.push(actual.id);
-        if (!moneyEqual(actual.initialPrice, item.initialPrice) || !moneyEqual(actual.expectedPrice, item.expectedPrice) || actual.initialPriceCaptureEligible) productsChanged = true;
-      }
-      const projectChanged = Object.entries(projection.project).some(([field, value]) => field === "currency"
-        ? currentProject.currency !== value : !moneyEqual(currentProject[field as keyof typeof currentProject], value));
-      const oldRate = storedKpRate(context.proposal), rateChanged = !oldRate || apiDigest(rateDto(oldRate)) !== apiDigest(rateDto(fx));
-      if (productsChanged || projectChanged) {
-        await applyProjectionInTransaction(tx, context, projection);
-      }
-      if (changedPools.length) await tx.productStagePayPool.updateMany({ where: { productId: { in: changedPools }, kind: "ENGINEERING", state: "DRAFT" }, data: { revision: { increment: 1 } } });
-      if (rateChanged) await tx.commercialProposal.update({ where: { id: context.proposalId }, data: {
-        currency: fx.currency, rate: fx.value, rateDate: new Date(`${fx.date}T00:00:00Z`), rateSource: fx.source } });
-      return { changed: productsChanged || projectChanged || rateChanged };
-    },
-  };
+export function createApiSaveHooks(fx: ProposalFixedRate, preparedCopies?: PreparedProductMedia) {
+  return createProposalSaveHooks(fx, preparedCopies, (kind, message) =>
+    kind === "conflict" ? apiFailure("KP_COMPOSITION_CHANGED", 409, message) : apiFailure("KP_PRICING_INVALID", 400, message));
 }
 export async function afterDocumentMutation(context: KpApiContext, mutation: ProposalWriteMutation) {
   if (mutation.projectCreated) await deliverProjectCreated(context.actor, mutation.projectCreated);
