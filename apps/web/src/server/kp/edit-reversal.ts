@@ -1,3 +1,4 @@
+import { createProposalSaveHooks } from "./save-hooks";
 import type { Prisma } from "@prisma/client";
 import { defineJournalReversal, JournalReversalRefusal } from "@/server/changelog/reversal-contract";
 import { lockProjectRow } from "@/server/projects/lock";
@@ -54,13 +55,12 @@ export const proposalEditReversal = defineJournalReversal({
     ) ORDER BY id FOR UPDATE`;
     const { version, binding, baseline } = await editTarget(tx, data);
     if (!reversalId) throw new JournalReversalRefusal("Не подтверждён идентификатор отката КП");
-    const { createApiSaveHooks } = await import("./api-documents");
     try {
       const client = await applyProposalClientEffect(ctx, data.clientEffect);
       const mutation = await saveProposalInTransaction(tx, actor, {
         proposalId: data.proposalId, expectedRevision: data.expectedRevision, operationId: reversalId.split(":").at(-1),
         clientId: binding.clientId, state: version.state,
-      }, { ...createApiSaveHooks(binding.fx), restoreVersion: true, journalRootId: reversalId,
+      }, { ...createProposalSaveHooks(binding.fx), restoreVersion: true, journalRootId: reversalId,
         journalBaseline: baseline, journalClientEffect: client?.inverse });
       if (!mutation.undo || mutation.result.noOp || canonicalProposalJson(mutation.result.state) !== canonicalProposalJson(version.state))
         throw new JournalReversalRefusal("Не удалось точно восстановить прежнюю редакцию КП");

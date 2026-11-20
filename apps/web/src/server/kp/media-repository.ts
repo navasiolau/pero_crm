@@ -6,8 +6,8 @@ import { assertProposalMediaAccess } from "./media-access";
 import { KP_MEDIA_LEASE_MS, KP_MEDIA_ORPHAN_DELAY_MS, ProposalMediaError, parseMediaBinding, sameMediaBinding,
   validateMediaPlan, type MediaOperation, type MediaOwner, type MediaPlan,
   type MediaReservation, type ReadableMedia } from "./media-contract";
-import { createMediaUploadPlan, createProductMediaCopyPlan,
-  type ProposalMediaRepository } from "./media-core";
+import { createMediaUploadPlan, createProductMediaCopyPlan } from "./media-plan";
+import type { ProposalMediaRepository } from "./media-core";
 import { proposalMediaUploadReversal } from "./media-upload-reversal";
 import {projectJournalContext} from '../projects/journal';
 
