@@ -54,7 +54,8 @@ export async function reverseJournalActionInTransaction(tx: Prisma.TransactionCl
   const request = requestSchema.parse(input);
   await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${actorId} FOR SHARE`;
   const { root, handler, presentation, ctx } = await loadReversal(tx, actorId, request);
-  await tx.$queryRaw`SELECT id FROM "ChangeLog" WHERE id = ${root.id} FOR UPDATE`;
+  // Журнал доступен для добавления и чтения. Сериализуем откаты по исходному ID без права менять строку истории.
+  await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(18469, hashtext(${root.id}))`;
   const reversalId = `journal-reversal:${request.requestId.toLowerCase()}`;
   const earlier = await tx.changeLog.findUnique({ where: { id: reversalId }, select: { actorId: true, reversesId: true } });
   if (earlier) {

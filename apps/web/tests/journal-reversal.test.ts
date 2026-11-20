@@ -20,7 +20,10 @@ function fixture() {
   let role: Role = "DIRECTOR";
   let failAudit = false;
   const tx = {
-    $queryRaw: async (query: TemplateStringsArray) => query.join("").includes("pricingVersion") ? [{ pricingVersion: "1" }] : [],
+    $queryRaw: async (query: TemplateStringsArray) => {
+      assert.doesNotMatch(query.join(" "), /FROM\s+"ChangeLog".*FOR\s+(?:NO KEY )?UPDATE/i);
+      return query.join("").includes("pricingVersion") ? [{ pricingVersion: "1" }] : [];
+    },
     domainEvent: { create: async () => ({ id: randomUUID() }) },
     project: {
       findUnique: async () => ({ ...project }),
