@@ -322,9 +322,16 @@ test("security.routes: credentials, Bearer, Telegram и команды чере�
       assert.equal((await api(path, undefined, method, body)).status, 401);
       assert.equal((await api(path, wrong.raw, method, body)).status, 403);
     }
-    for (const [code, target, status] of [[randomBytes(18).toString("base64url"), chatId, 400], [expiredCode, chatId, 400], [inactiveCode, chatId, 403], [linkCode, occupied, 400], [linkCode, `-${chatId}`, 400]] as const) {
-      assert.equal((await api("/api/v1/bot/link", write.raw, "POST", { code, chatId: target })).status, status);
-      assert.deepEqual(await f.db.telegramLink.findMany({ orderBy: { id: "asc" } }), baseline);
+    for (const [scenario, code, target, status] of [
+      ["unknown", randomBytes(18).toString("base64url"), chatId, 400],
+      ["expired", expiredCode, chatId, 400],
+      ["inactive account", inactiveCode, chatId, 403],
+      ["occupied chat", linkCode, occupied, 400],
+      ["group chat", linkCode, `-${chatId}`, 400],
+    ] as const) {
+      const response = await api("/api/v1/bot/link", write.raw, "POST", { code, chatId: target });
+      assert.equal(response.status, status, "Telegram link rejection: " + scenario);
+      assert.deepEqual(await f.db.telegramLink.findMany({ orderBy: { id: "asc" } }), baseline, "Telegram linkage drift: " + scenario);
     }
     const linked = await api("/api/v1/bot/link", write.raw, "POST", { code: linkCode, chatId, username: "fixture" }); assert.equal(linked.status, 200);
     assert.deepEqual((await linked.json()).user, { id: engineer.id, name: engineer.name, roles: ["ENGINEER"], botAllowed: false });
