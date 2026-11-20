@@ -307,7 +307,7 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     await f.rollback(async tx => {
       await tx.payment.create({ data: { id: linkedPaymentId, projectId: project.id, cashAccountId: cash.id,
         expenseArticleId: article.id, createdById: accountant.id, direction: "EXPENSE", amount: "0.01",
-        bynAmount: "0.01", currency: "BYN", reportDocumentId: docs[2].id } });
+        bynAmount: "0.01", projectAmount: "0.01", currency: "BYN", reportDocumentId: docs[2].id } });
       await tx.paymentReportDocument.create({ data: { paymentId: linkedPaymentId, documentId: parallelId, position: 1 } });
       const journalService = createFinanceDocumentService({ transaction: operation => operation(tx), storage });
       await assert.rejects(() => reverseJournalActionInTransaction(tx, accountant.id, request), /Недостаточно прав/);
