@@ -177,7 +177,14 @@ test("media.sketch: настоящие upload, receipts, CAS, аудит и со
     });
   });
   const after = await snapshot(); assert.equal(after.product.sketchFileId, pointer);
-  assert.deepEqual(unchangedFields(after.product), unchangedFields(product)); assert.deepEqual(await f.db.project.findUnique({ where: { id: project.id } }), project);
+  // Сценарий дважды меняет назначение инженера и трижды меняет статус.
+  // Исходные значения возвращаются, а ревизии сохраняют историю этих пяти изменений.
+  assert.deepEqual(unchangedFields(after.product), {
+    ...unchangedFields(product),
+    ...("fieldRevisions" in product ? { fieldRevisions: { engineerId: 2 } } : {}),
+    ...("workflowRevision" in product ? { workflowRevision: 5 } : {}),
+  });
+  assert.deepEqual(await f.db.project.findUnique({ where: { id: project.id } }), project);
   assert.deepEqual(await f.db.file.findUnique({ where: { id: attachmentId } }), attachment);
   assert.deepEqual(after.versions.filter(row => attachmentKeys.includes(row.key)), attachmentVersions);
   assert.deepEqual(after.versions.filter(row => neighbors.includes(row.key)), neighborVersions);
