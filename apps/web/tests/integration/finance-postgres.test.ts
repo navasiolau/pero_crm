@@ -502,6 +502,11 @@ test("warehouse/expense-receipt-partial-issue-current-valuation-and-reversal", a
   await verifyNativeExpenseReceiptIssue(tx, rows);
 }));
 
+test("expenses/all-101-matching-rows-total-and-stable-final-ID", async () => fixture.rollback(async tx => {
+  const { verifyOrganizationExpenseList } = await import("../helpers/native-organization-expense-list");
+  await verifyOrganizationExpenseList(tx);
+}));
+
 test("payment/scenario-minimal-effects-replay-skips-fx", async () => fixture.rollback(async (tx, rows) => {
   const c = await cashContext(tx, rows), input: PaymentInput = { direction: "INCOME", cashAccountId: c.account.id, amount: 100, currency: "BYN", comment: "own", clientMutationId: randomUUID() };
   let prepared = 0;
