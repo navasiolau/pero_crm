@@ -419,6 +419,10 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
         assert.equal(canonical.origin, f.target.baseUrl);
         assert.equal(canonical.pathname, path);
         assert.equal(canonical.searchParams.get("view"), "table");
+        const landing = await f.request(canonical.pathname + canonical.search, reader);
+        assert.equal(landing.status, 200);
+        await landing.arrayBuffer();
+        canonical.searchParams.set("id", expense.id);
         response = await f.request(canonical.pathname + canonical.search, reader);
       }
       assert.equal(response.status, 200);
