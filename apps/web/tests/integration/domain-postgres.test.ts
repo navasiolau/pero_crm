@@ -1427,6 +1427,19 @@ test("task/create-ten-identical-receipts-collisions-revocation-deleted-ACK-and-S
   assert.equal(original.estimateMinutes, null);
   assert.equal(original.assigneeId, recipient.id); assert.equal(original.createdById, w.worker.id); assert.equal(original.quantity!.toFixed(2), "2.00"); assert.equal(original.allocationGroupId, null);
   assert.deepEqual((await fixture.db.taskDependency.findMany({ where: { taskId: original.id }, orderBy: { dependsOnId: "asc" } })).map(row => row.dependsOnId), parts.map(row => row.id).sort());
+  const reversal = scope.load<typeof import("../../src/server/changelog/reversal-core")>("../src/server/changelog/reversal-core");
+  const allocationAudit = await fixture.db.changeLog.findFirstOrThrow({ where: { entityId: allocation.id, action: "create" } });
+  const undoAllocation = { entryId: allocationAudit.id, requestId: randomUUID(), scope: { kind: "global" } };
+  assert.equal(original.journalDependencyRevision, 2);
+  assert.deepEqual(allocationAudit.reversal, { kind: "work-task.lifecycle", version: 1,
+    data: { entity: "task", id: allocation.id, revision: original.journalRevision, deleted: false } });
+  await fixture.rollback(async tx => {
+    await reversal.previewJournalReversalInTransaction(tx, w.admin.id, undoAllocation);
+    const result = await reversal.reverseJournalActionInTransaction(tx, w.admin.id, undoAllocation);
+    assert.ok((await tx.task.findUniqueOrThrow({ where: { id: allocation.id } })).deletedAt);
+    assert.equal(await tx.taskDependency.count({ where: { taskId: allocation.id, deletedAt: null } }), 2);
+    assert.equal((await tx.changeLog.findUniqueOrThrow({ where: { id: result.reversalId } })).reversesId, allocationAudit.id);
+  });
   const repeatedAllocation = await run(w.worker, fixture.db, () => workerAllocation.createWorkerTaskAllocationCore(w.worker, request, realTransaction(fixture.db))); assert.ok(repeatedAllocation.ok && repeatedAllocation.repeated);
   for (const invalid of [{ quantity: "3.00", clientMutationId: request.clientMutationId }, { assigneeId: w.engineer.id }, { quantity: "1.001" }, { quantity: "11" },
     { executorShare: 0.5 }, { estimateMinutes: 0 }, { dependencyIds: ["missing"] }]) {
@@ -1463,11 +1476,15 @@ test("task/create-ten-identical-receipts-collisions-revocation-deleted-ACK-and-S
   await fixture.db.task.create({ data: { projectId: w.project.id, productId: w.product.id, workId: measuredWork.id, title: "Неизвестный старый объём", quantity: null } });
   const unknown = await run(w.worker, fixture.db, () => workerAllocation.createWorkerTaskAllocationCore(w.worker, { ...measure, quantity: "0.01", clientMutationId: randomUUID() }, realTransaction(fixture.db)));
   assert.ok(!unknown.ok); assert.match(unknown.error, /не определён объём/);
-  const reversal = scope.load<typeof import("../../src/server/changelog/reversal-core")>("../src/server/changelog/reversal-core");
-  const allocationAudit = await fixture.db.changeLog.findFirstOrThrow({ where: { entityId: allocation.id, action: "create" } });
-  await fixture.db.$transaction(tx => reversal.reverseJournalActionInTransaction(tx, w.admin.id, {
-    entryId: allocationAudit.id, requestId: randomUUID(), scope: { kind: "global" },
-  }));
+  const currentAllocation = await fixture.db.task.findUniqueOrThrow({ where: { id: allocation.id } });
+  assert.equal(currentAllocation.quantity?.toFixed(2), "3.00");
+  assert.ok(currentAllocation.journalRevision > original.journalRevision);
+  await assert.rejects(() => fixture.db.$transaction(tx =>
+    reversal.reverseJournalActionInTransaction(tx, w.admin.id, undoAllocation)), /Задача отсутствует или изменилась/);
+  assert.deepEqual(await fixture.db.task.findUniqueOrThrow({ where: { id: allocation.id } }), currentAllocation);
+  assert.equal(await fixture.db.changeLog.count({ where: { reversesId: allocationAudit.id } }), 0);
+  const removal = await run(w.admin, fixture.db, () => tasks.deleteTask(allocation.id));
+  assert.ok(removal.ok);
   const missing = await run(w.worker, fixture.db, () => workerAllocation.createWorkerTaskAllocationCore(w.worker, request, realTransaction(fixture.db)));
   assert.ok(!missing.ok && missing.kind === "conflict");
   assert.equal(await fixture.db.task.count({ where: { id: allocation.id, deletedAt: null } }), 0);
