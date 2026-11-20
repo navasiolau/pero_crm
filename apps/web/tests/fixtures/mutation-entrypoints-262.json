@@ -5,6 +5,7 @@
   "app/api/finance/documents/upload/route.ts": ["POST"],
   "app/api/kp/[[...path]]/route.ts": ["DELETE","PATCH","POST","PUT"],
   "app/api/logistics/documents/upload/route.ts": ["POST"],
+  "app/api/telegram/finance/binding/route.ts": ["POST"],
   "app/api/telegram/finance/session/route.ts": ["POST"],
   "app/api/v1/bot/calendar-reminders/ack/route.ts": ["POST"],
   "app/api/v1/bot/calendar-reminders/authorize/route.ts": ["POST"],
