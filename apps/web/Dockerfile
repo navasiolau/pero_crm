@@ -39,7 +39,7 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     PORT=3000
 # prisma CLI — для `migrate deploy` при старте контейнера
-RUN npm i -g prisma@6.19.3
+RUN apk add --no-cache setpriv && npm i -g prisma@6.19.3
 COPY --from=build /app/apps/web/.next/standalone ./
 # Externalized пакет использует CJS entry/limits и динамические fs assets вне tracing.
 COPY --from=build /app/packages/kp-template/index.cjs /app/packages/kp-template/furniture-specifications.js /app/packages/kp-template/limits.cjs /app/packages/kp-template/package.json /app/packages/kp-template/source-manifest.json /app/packages/kp-template/fonts-manifest.json ./packages/kp-template/
@@ -53,5 +53,9 @@ COPY --from=build /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=build /app/apps/web/public ./apps/web/public
 COPY apps/web/prisma apps/web/prisma
 EXPOSE 3000
-COPY apps/web/runtime-start.sh apps/web/runtime-start.sh
+COPY apps/web/runtime-start.sh apps/web/runtime-migrate.cjs apps/web/runtime-web.cjs apps/web/
+RUN mkdir -p /app/apps/web/.next/cache /run/pero-crm \
+    && chown node:node /app/apps/web/.next/cache \
+    && chmod 0700 /run/pero-crm
+LABEL pero.crm.runtime-init="1"
 CMD ["sh", "apps/web/runtime-start.sh"]

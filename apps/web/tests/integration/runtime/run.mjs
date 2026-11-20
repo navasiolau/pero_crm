@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, readFileSync, readdirSync, realpathSync } f
 import path from 'node:path';
 import { CreateBucketCommand, PutBucketVersioningCommand, S3Client } from '@aws-sdk/client-s3';
 import { assertCiJob, assertCiPostgresTarget, assertCiRuntimeTarget, integrationFiles, requireCi } from './target.mjs';
-import { docker, inspectService, inspectWeb, proveImageMigrations, startMinio, startWeb } from './containers.mjs';
+import { docker, inspectService, inspectWeb, proveImageMigrations, proveRestrictedWebStartup, startMinio, startWeb } from './containers.mjs';
 import { proveRuntimePrivileges } from './runtime-privileges.mjs';
 import { cleanup, processOwner, recordProcesses } from './cleanup.mjs';
 
@@ -110,6 +110,7 @@ try {
   requireCi(!finishing, 'cancelled');
   startWeb(target);
   await ready(`${target.baseUrl}/api/health`, 'ok');
+  await proveRestrictedWebStartup(target);
   startWeb(target, true);
   await ready(`${target.faultBaseUrl}/api/health`, 'ok');
   // Instrumentation сначала проходит с доступной БД; затем обрываются только соединения собственной CI-роли.

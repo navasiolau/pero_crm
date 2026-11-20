@@ -1,9 +1,24 @@
-# Подключать после отдельной приёмки защищённого runtime LOGIN и мягких удалений.
+# Только согласованный staging. Установить как часть стандартного Compose override.
 services:
   web:
+    image: ${CRM_WATCH_WEB_IMAGE:-ghcr.io/navasiolau/pero_crm:staging}
     environment:
       DATABASE_URL: ${CRM_RUNTIME_DATABASE_URL:?Укажите ограниченный DATABASE_URL}
       PERO_DB_ENFORCE_RUNTIME: '1'
+      PERO_DB_MIGRATE_ON_START: '1'
+      PERO_DB_MIGRATOR_ROLE: crm
+      PERO_DB_MIGRATION_DATABASE: crm
+      PERO_DB_SKIP_MIGRATION: ${CRM_WATCH_SKIP_MIGRATION:-0}
       DB_PASSWORD: ''
+      POSTGRES_PASSWORD: ''
       DATABASE_MIGRATION_URL: ''
       CRM_RUNTIME_DATABASE_URL: ''
+      DIRECT_URL: ''
+      SHADOW_DATABASE_URL: ''
+    volumes:
+      - type: bind
+        source: /opt/crm-staging/.pero-migrator.env
+        target: /run/pero-crm/migrator.env
+        read_only: true
+        bind:
+          create_host_path: false

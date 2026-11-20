@@ -220,6 +220,83 @@ function webEnvironment(target, fault = false) {
     S3_REGION: 'us-east-1', AUTH_SECRET: target.authSecret, AUTH_URL: fault ? target.faultBaseUrl : target.baseUrl, AUTH_TRUST_HOST: 'true' };
 }
 
+/** Proves the actual tested image can launch as W07 does after a native migration init. */
+export async function proveRestrictedWebStartup(target) {
+  const pg = inspectService(target, target.postgresId, 'postgres');
+  const address = pg.NetworkSettings.Networks[target.network].IPAddress;
+  requireCi(/^\d{1,3}(\.\d{1,3}){3}$/.test(address), 'restricted-web-db-address');
+  const image = inspectWebImage(target);
+  const role = `ci_restricted_${target.runId}_${target.attempt}`;
+  const synthetic = `ci-only-${target.runId}-${target.attempt}`;
+  requireCi(/^ci_restricted_[1-9]\d*_[1-9]\d*$/.test(role) && role.length < 63 &&
+    new URL(target.databaseUrl).password === synthetic, 'restricted-web-fixture-role');
+  const owner = (sql) => docker(['exec', target.postgresId, 'psql', '-X', '-v', 'ON_ERROR_STOP=1', '-U', 'ci_runner', '-d', 'pero_ci', '-At', '-c', sql]);
+  const identity = JSON.parse(owner(`SELECT json_build_object('db',current_database(),'role',current_user,'primary',NOT pg_is_in_recovery(),
+    'claimed',EXISTS(SELECT 1 FROM pg_roles WHERE rolname='${role}'),'group','pero_crm_runtime_' || left(md5(current_database()),16))`));
+  requireCi(identity.db === 'pero_ci' && identity.role === 'ci_runner' && identity.primary && !identity.claimed &&
+    /^pero_crm_runtime_[0-9a-f]{16}$/.test(identity.group), 'restricted-web-db-identity');
+  const name = `${target.webName}-restricted`;
+  requireCi(!docker(['ps', '-aq', '--filter', `name=^/${name}$`]), 'restricted-web-container-fresh');
+  const dir = mkdtempSync(path.join(process.env.RUNNER_TEMP, 'pero-runtime-'));
+  const credential = path.join(dir, 'migrator.env');
+  let roleCreated = false;
+  try {
+    owner(`CREATE ROLE "${role}" LOGIN NOSUPERUSER NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '${synthetic}';
+      GRANT "${identity.group}" TO "${role}" WITH INHERIT TRUE, SET FALSE, ADMIN FALSE;`);
+    roleCreated = true;
+    // Имитируем потерю табличного grant при восстановлении без ACL.
+    owner(`REVOKE SELECT ON TABLE public."OrgSetting" FROM "${identity.group}"`);
+    requireCi(owner(`SELECT has_table_privilege('${role}', 'public."OrgSetting"', 'SELECT')`) === 'f', 'restricted-web-fixture-acl-gap');
+    writeFileSync(credential, `DATABASE_URL=postgresql://ci_runner:${synthetic}@db:5432/pero_ci?schema=public\n`, { mode: 0o400, flag: 'wx' });
+    execFileSync('sudo', ['-n', 'chown', '0:0', '--', credential], { stdio: 'ignore' });
+    const secretInfo = lstatSync(credential);
+    requireCi(secretInfo.uid === 0 && secretInfo.gid === 0 && (secretInfo.mode & 0o777) === 0o400, 'restricted-web-secret-metadata');
+    const settings = {
+      ...webEnvironment(target),
+      DATABASE_URL: `postgresql://${role}:${synthetic}@db:5432/pero_ci?schema=public`,
+      PERO_DB_ENFORCE_RUNTIME: '1', PERO_DB_MIGRATE_ON_START: '1', PERO_DB_MIGRATION_DATABASE: 'pero_ci', PERO_DB_MIGRATOR_ROLE: 'ci_runner',
+    };
+    const args = ['run', '-d', '--rm', '--name', name, '--network', target.network, '--add-host', `db:${address}`,
+      '--mount', `type=bind,source=${credential},target=/run/pero-crm/migrator.env,readonly`];
+    for (const [key, value] of Object.entries(labels(target, 'web-restricted'))) args.push('--label', `${key}=${value}`);
+    for (const [key, value] of Object.entries(settings)) args.push('--env', `${key}=${value}`);
+    const id = docker([...args, image.Id]);
+    requireCi(/^[a-f0-9]{64}$/.test(id), 'restricted-web-container-id');
+    let ready = false;
+    for (let attempt = 0; attempt < 25; attempt++) {
+      try {
+        const output = docker(['exec', id, 'node', '-e',
+          "Promise.all([fetch('http://127.0.0.1:3000/api/health').then(async r=>r.ok&&(await r.json()).database==='ok'),fetch(process.env.S3_ENDPOINT+'/minio/health/ready').then(r=>r.ok)]).then(value=>{if(value.every(Boolean))process.stdout.write('ready');else process.exit(1)}).catch(()=>process.exit(1))"], 2500);
+        if (output === 'ready') { ready = true; break; }
+      } catch { /* Только bounded polls, без вывода Docker stderr. */ }
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    requireCi(ready, 'restricted-web-readiness-and-s3');
+    requireCi(owner(`SELECT has_table_privilege('${role}', 'public."OrgSetting"', 'SELECT')`) === 't', 'restricted-web-reconciled-grants');
+    docker(['exec', '--user', '1000:1000', id, 'sh', '-c', 'test ! -r /run/pero-crm/migrator.env && test -w /app/apps/web/.next/cache']);
+    const pid = docker(['exec', id, 'cat', '/proc/1/status']);
+    requireCi(/^Uid:\s+1000\s+1000\s+1000\s+1000$/m.test(pid) && /^NoNewPrivs:\s+1$/m.test(pid) &&
+      ['CapInh','CapPrm','CapEff','CapBnd','CapAmb'].every(field => new RegExp('^'+field+':\\s+0+$','m').test(pid)), 'restricted-web-runtime-identity');
+    console.log(JSON.stringify({ ciRuntime: 'restricted-web-startup', migrated: true, roleViolations: 0, unprivileged: true, ownerSecretUnreadable: true, s3Ready: true }));
+  } finally {
+    const id = docker(['ps', '-aq', '--no-trunc', '--filter', `name=^/${name}$`]);
+    if (id) {
+      requireCi(/^[a-f0-9]{64}$/.test(id), 'restricted-web-cleanup-id');
+      const [current] = JSON.parse(docker(['inspect', '--type', 'container', id]));
+      requireCi(current.Id === id && current.Name === `/${name}` && current.Image === image.Id &&
+        current.HostConfig.NetworkMode === target.network &&
+        Object.entries(labels(target, 'web-restricted')).every(([key, value]) => current.Config.Labels?.[key] === value), 'restricted-web-cleanup-owner');
+      docker(['rm', '--force', id]);
+    }
+    if (roleCreated) {
+      owner('SELECT public.pero_refresh_runtime_grants()');
+      owner(`DROP ROLE "${role}"`);
+    }
+    if (existsSync(credential)) unlinkSync(credential);
+    rmdirSync(dir);
+  }
+}
+
 /** @param {CiJob} target @param {string} id @param {boolean} [fault] */
 export function inspectWeb(target, id, fault = false) {
   requireCi(/^[a-f0-9]{64}$/.test(id), 'web-container-id');
