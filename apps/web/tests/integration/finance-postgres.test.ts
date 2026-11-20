@@ -322,12 +322,16 @@ for (const linked of [false, true]) test(`payment/report-owner-ready-context-rep
     assert.equal(watched.calls.length, 0, "INTERNAL_CONTEXT_REJECTS_CLIENT_POLICY_FLAGS_BEFORE_SQL");
   }
   await assert.rejects(payments.createPaymentInTransaction(other, c.input, c.prepared, tx), /документ/i);
-  await tx.financeDocument.update({ where: { id: c.document.id }, data: { state: "PENDING", readyAt: null } });
-  const pending = await tx.financeDocument.findUniqueOrThrow({ where: { id: c.document.id }, include: { payment: true } });
+  await rejectedSql(tx, () => tx.financeDocument.update({ where: { id: c.document.id }, data: { state: "PENDING", readyAt: null } }), /cannot return to draft/);
+  const pending = await tx.financeDocument.create({ data: {
+    uploadedById: c.actor.id, clientMutationId: randomUUID(), requestFingerprint: randomUUID(),
+    fileName: "Незавершённая загрузка.pdf", mimeType: "application/pdf", size: 12, contentHash: randomUUID(),
+    storageKey: rows.id("pending-payment-document"), storageMode: "s3", state: "PENDING",
+  }, include: { payment: true } });
   assert.equal(pending.state, "PENDING"); assert.equal(pending.payment, null);
-  await assert.rejects(payments.createPaymentInTransaction(c.actor, c.input, c.prepared, tx), { message: "Отчётный документ недоступен или уже прикреплён к другой операции" });
+  await assert.rejects(payments.createPaymentInTransaction(c.actor, { ...c.input, reportDocumentId: pending.id }, c.prepared, tx), { message: "Отчётный документ недоступен или уже прикреплён к другой операции" });
   assert.deepEqual(await money(tx), before);
-  await tx.financeDocument.update({ where: { id: c.document.id }, data: { state: "READY", readyAt: c.document.readyAt } });
+  assert.equal((await tx.financeDocument.findUniqueOrThrow({ where: { id: c.document.id } })).state, "READY");
   const ordinaryInput = { ...c.input, skipReportDocument: true, source: "warehouse" };
   const first = await payments.createPaymentInTransaction(c.actor, ordinaryInput, c.prepared, tx), saved = await money(tx);
   assert.equal(first.payment.logisticsAllocationId, null); assert.equal(await tx.stockMovement.count({ where: { createdById: c.actor.id } }), 0);
@@ -345,6 +349,7 @@ for (const linked of [false, true]) test(`payment/report-owner-ready-context-rep
   for (const [actor, input, pattern] of [[c.actor, { ...c.input, comment: "changed" }, /другими данными/], [other, c.input, /другими данными/],
     [c.actor, { ...c.input, clientMutationId: randomUUID() }, /документ/i]] as const)
     await assert.rejects(payments.createPaymentInTransaction(actor, input, c.prepared, tx), pattern);
+  // Имитация старой удалённой проводки для проверки совместимости сохранённой квитанции.
   await tx.payment.delete({ where: { id: first.payment.id } });
   await assert.rejects(payments.createPaymentInTransaction(c.actor, c.input, c.prepared, tx), /удалена/);
   const legacyInput = { ...c.input, reportDocumentId: undefined, clientMutationId: randomUUID() };
