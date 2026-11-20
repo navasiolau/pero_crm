@@ -21,7 +21,7 @@ function signed(fields: Record<string, string> = {}, botToken = token) {
 }
 
 test("Mini App accepts only current signed private Telegram identity from the configured bot", () => {
-  assert.equal(verifiedTelegramIdentity(signed(), token, now), String(user.id));
+  assert.deepEqual(verifiedTelegramIdentity(signed(), token, now), { chatId: String(user.id), authenticatedAt: now * 1000 });
   assert.equal(verifiedTelegramIdentity(signed({}, "other-bot"), token, now), null);
   assert.equal(verifiedTelegramIdentity(signed({ auth_date: String(now - 121) }), token, now), null);
   assert.equal(verifiedTelegramIdentity(signed({ auth_date: String(now + 16) }), token, now), null);
@@ -32,7 +32,7 @@ test("Mini App accepts only current signed private Telegram identity from the co
 });
 
 test("grant is tamper-evident and route scope excludes organizational and personal-plan endpoints", () => {
-  const grant = { chatId: String(user.id), userId: "a1", version: 1, linkedAt: "2026-11-21T13:00:00.000Z", linkId: "tg1", expires: now + 600 };
+  const grant = { chatId: String(user.id), userId: "a1", generation: 1, version: 1, linkedAt: "2026-11-21T13:00:00.000Z", linkId: "tg1", expires: now + 600 };
   const cookie = signFinanceGrant(grant, secret);
   assert.deepEqual(readFinanceGrant(cookie, secret, now), grant);
   assert.equal(readFinanceGrant(cookie, secret, now + 600), null);
@@ -57,8 +57,8 @@ process.env.PERO_TELEGRAM_FINANCE_ORIGIN = origin;
 process.env.PERO_TELEGRAM_FINANCE_BOT_TOKEN = token;
 process.env.PERO_TELEGRAM_FINANCE_SESSION_SECRET = secret;
 
-const dbUser = { id: "accountant-1", active: true, name: "Бухгалтер", email: "accountant@example.invalid", roles: ["ACCOUNTANT"], sessionVersion: 1 };
-const dbLink = { id: "link-1", linkedAt: new Date("2026-11-21T13:00:00.000Z"), user: dbUser };
+const dbUser = { id: "accountant-1", active: true, name: "Бухгалтер", email: "accountant@example.invalid", roles: ["ACCOUNTANT"], sessionVersion: 1, updatedAt: new Date((now - 1000) * 1000) };
+const dbLink = { id: "link-1", linkedAt: new Date((now - 1000) * 1000), revokedAt: null, generation: 1, user: dbUser };
 let linked = true;
 let activeLink = dbLink;
 let lookups = 0;
@@ -99,6 +99,10 @@ test("entry verifies before lookup, sets only scoped cookie, and revocation is i
   assert.equal(await resolveTelegramFinanceSession(cookie), null);
   activeLink = { ...dbLink, linkedAt: new Date("2026-11-21T13:31:00.000Z") };
   assert.equal(await resolveTelegramFinanceSession(cookie), null);
+  activeLink = { ...dbLink, generation: 2 };
+  assert.equal(await resolveTelegramFinanceSession(cookie), null);
+  activeLink = { ...dbLink, generation: 3, linkedAt: new Date(now * 1000 + 1) };
+  assert.equal((await POST(request(signed()))).status, 403);
   linked = false;
   assert.equal(await resolveTelegramFinanceSession(cookie), null);
   assert.equal((await POST(request(signed()))).status, 403);

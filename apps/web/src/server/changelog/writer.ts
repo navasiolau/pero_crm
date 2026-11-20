@@ -12,6 +12,11 @@ export async function writeChangeLogInTransaction(
   entry: JournalEntryInput,
   hints: JournalPresentationHints = {},
 ) {
+  if (["calendarEntry", "calendarReminderFact", "telegramReminderOutbox", "personalPlan"].includes(entry.entity) ||
+      entry.field === "calendarEnabled" ||
+      (entry.entity === "notificationPreference" && entry.entityId.endsWith(":plan.reminder"))) {
+    throw new Error("События личного плана исключены из журнала");
+  }
   const createdAt = entry.createdAt ?? new Date();
   const source = entry.source ?? "web";
   const normalized = { ...entry, createdAt, source,
@@ -26,6 +31,9 @@ export async function writeChangeLogInTransaction(
     ...(entry.id === undefined ? {} : { id: entry.id }), actorType: entry.actorType, actorId: entry.actorId, actorName: entry.actorName,
     entity: entry.entity, entityId: entry.entityId, action: entry.action, field: entry.field,
     oldValue: rawJson(entry.oldValue), newValue: rawJson(entry.newValue), source, createdAt,
+    ...(entry.operationRootId ? { operationRootId: entry.operationRootId } : {}),
+    ...(entry.reversal ? { reversal: entry.reversal } : {}),
+    ...(entry.reversesId ? { reversesId: entry.reversesId } : {}),
     presentation: JSON.parse(JSON.stringify(presentation)) as Prisma.InputJsonValue,
     searchText: buildJournalSearchText(normalized, presentation),
   } });

@@ -77,20 +77,23 @@ export async function createApiTokenInTransaction(tx: Prisma.TransactionClient, 
   const creator = row.createdById ? row.createdById === actor.id ? { id: actor.id, name: actor.name }
     : await tx.user.findUnique({ where: { id: row.createdById }, select: { id: true, name: true } }) : null;
   await writeChangeLogInTransaction(tx, { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
-    entity: "apiToken", entityId: row.id, action: "create", newValue: after }, {
+    entity: "apiToken", entityId: row.id, action: "create", newValue: after,
+    reversal: { kind: "account.api-token-issue", version: 1, data: { createdAt: after.createdAt, mode: "revoke" } },
+  }, {
     before: null, after, entity: { label: `Доступ API «${row.name}»`, href: "/settings/api" },
     ...(creator ? { links: [{ type: "user", id: creator.id, label: creator.name, href: "/settings/users" }] } : {}),
   });
   return { token, id: row.id };
 }
 
-export async function revokeApiTokenInTransaction(tx: Prisma.TransactionClient, actor: DomainActor, tokenId: string) {
+export async function revokeApiTokenInTransaction(tx: Prisma.TransactionClient, actor: DomainActor, tokenId: string, options?: { reversal: true }) {
   requireActorRoles(actor, ADMIN_ROLES);
   await tx.$queryRaw`SELECT id FROM "ApiToken" WHERE id = ${tokenId} FOR UPDATE`;
   const before = await tx.apiToken.findUnique({ where: { id: tokenId } });
   if (!before) return { ok: false as const, error: "Токен не найден" };
   if (before.revokedAt) return { ok: true as const, noOp: true };
   const after = await tx.apiToken.update({ where: { id: tokenId }, data: { revokedAt: new Date() } });
+  if (options?.reversal) return { ok: true as const, noOp: false, before: apiTokenAuditSnapshot(before), after: apiTokenAuditSnapshot(after) };
   await writeChangeLogInTransaction(tx, { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
     entity: "apiToken", entityId: tokenId, action: "revoke", oldValue: apiTokenAuditSnapshot(before), newValue: apiTokenAuditSnapshot(after) }, {
     before: apiTokenAuditSnapshot(before), after: apiTokenAuditSnapshot(after), entity: { label: `Доступ API «${after.name}»`, href: "/settings/api" },

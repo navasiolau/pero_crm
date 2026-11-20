@@ -5,7 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, us
 import { toast } from "sonner";
 
 import { saveListPreference } from "@/server/list-preferences-actions";
-import { DEFAULT_LIST_QUERY, type ListSection } from "./list-state";
+import { type ListSection } from "./list-state";
 import { createListSearchDraft, ListStateController, type ListStateSnapshot } from "./list-state-controller";
 
 const ListParamsContext = createContext<{
@@ -23,13 +23,14 @@ export function ListParamsProvider({ section, initialQuery, preference, children
   children: ReactNode;
 }) {
   const router = useRouter();
+  const pathname = section === "organizationExpenses" ? "/finance/expenses" : `/${section}`;
   const [navigating, startTransition] = useTransition();
   const notify = useRef(() => {});
   const [controller] = useState(() => new ListStateController({
     section, query: initialQuery, preference,
     save: (query, expected) => saveListPreference(section, query, expected),
-    navigate: (query) => startTransition(() => router.replace(`/${section}?${query}`, { scroll: false })),
-    isCurrent: () => window.location.pathname === `/${section}`,
+    navigate: (query) => startTransition(() => router.replace(`${pathname}?${query}`, { scroll: false })),
+    isCurrent: () => window.location.pathname === pathname,
     onChange: () => notify.current(),
     onError: (error) => toast.error(error instanceof Error ? error.message : "Не удалось сохранить параметры списка"),
   }));
@@ -66,7 +67,7 @@ export function useListParams() {
   const getQuery = useCallback(() => controller.getSnapshot().query, [controller]);
   const set = useCallback((updates: Record<string, string | null>) => controller.set(updates), [controller]);
   const reset = useCallback(() => controller.reset(), [controller]);
-  return { get, getQuery, set, reset, query: snapshot.query, pending: snapshot.pending || navigating, revision: snapshot.revision, searchRevision: snapshot.searchRevision, canReset: snapshot.query !== DEFAULT_LIST_QUERY };
+  return { get, getQuery, set, reset, query: snapshot.query, pending: snapshot.pending || navigating, revision: snapshot.revision, searchRevision: snapshot.searchRevision, canReset: snapshot.query !== controller.defaultQuery() };
 }
 
 // Таймер появляется только вследствие ввода, эффекты синхронизации не пишут URL.

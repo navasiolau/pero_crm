@@ -11,6 +11,5 @@ export async function saveViewPreference(
 ): Promise<{ ok: boolean }> {
   const session = await auth();
   if (!session?.user) throw new Error("Не авторизован");
-  await setUserPreference(session.user.id, key, value);
-  return { ok: true };
+  return { ok: await setUserPreference({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" }, key, value) };
 }

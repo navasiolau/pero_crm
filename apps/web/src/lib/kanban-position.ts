@@ -10,9 +10,11 @@ export interface KanbanPosition {
 }
 
 type PositionStorage = Pick<Storage, "getItem" | "setItem">;
+export type KanbanScope = ListSection | `projects/${string}`;
+
 const memory = new Map<string, KanbanPosition>();
 const coordinate = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 10_000_000;
-const key = (userId: string, section: ListSection) => `pero:kanban-position:v1:${encodeURIComponent(userId)}:${section}`;
+const key = (userId: string, scope: KanbanScope) => `pero:kanban-position:v1:${encodeURIComponent(userId)}:${scope}`;
 
 function sessionStorage(): PositionStorage | null {
   try { return window.sessionStorage; } catch { return null; }
@@ -35,8 +37,8 @@ export function decodeKanbanPosition(raw: string | null, query: string): KanbanP
   } catch { return null; }
 }
 
-export function readKanbanPosition(userId: string, section: ListSection, query: string, storage = sessionStorage()): KanbanPosition | null {
-  const storageKey = key(userId, section);
+export function readKanbanPosition(userId: string, scope: KanbanScope, query: string, storage = sessionStorage()): KanbanPosition | null {
+  const storageKey = key(userId, scope);
   try {
     if (storage) return decodeKanbanPosition(storage.getItem(storageKey), query);
   } catch { /* Запрет storage не должен ломать переход в карточку. */ }
@@ -44,8 +46,8 @@ export function readKanbanPosition(userId: string, section: ListSection, query: 
   return fallback?.query === query ? fallback : null;
 }
 
-export function writeKanbanPosition(userId: string, section: ListSection, position: KanbanPosition, storage = sessionStorage()): void {
-  const storageKey = key(userId, section);
+export function writeKanbanPosition(userId: string, scope: KanbanScope, position: KanbanPosition, storage = sessionStorage()): void {
+  const storageKey = key(userId, scope);
   memory.delete(storageKey);
   memory.set(storageKey, position);
   if (memory.size > 8) memory.delete(memory.keys().next().value!);

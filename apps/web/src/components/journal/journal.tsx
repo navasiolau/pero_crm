@@ -142,6 +142,6 @@ function JournalWorkspace({ scope, initialQuery }: { scope: JournalScope; initia
         setSelection({ row, section });
       }}/>
     </div> : null}
-    <JournalEntryDialog selection={selection} scope={scope} returnFocus={returnFocus} fallbackFocus={container} onClose={() => setSelection(null)}/>
+    <JournalEntryDialog selection={selection} scope={scope} returnFocus={returnFocus} fallbackFocus={container} onClose={() => setSelection(null)} onReversed={() => setRetry(value => value + 1)}/>
   </div>;
 }

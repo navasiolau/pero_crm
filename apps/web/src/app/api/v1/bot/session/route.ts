@@ -13,22 +13,23 @@ export async function GET(request: Request) {
   if (isErrorResponse(auth)) return auth;
 
   const chatId = new URL(request.url).searchParams.get("chatId");
-  if (!chatId) {
+  if (!chatId || !/^[1-9]\d{0,15}$/.test(chatId)) {
     return NextResponse.json({ ok: false, error: "Укажите chatId" }, { status: 400 });
   }
 
   const link = await prisma.telegramLink.findUnique({
     where: { chatId },
     include: {
-      user: { select: { id: true, name: true, roles: true, active: true } },
+      user: { select: { id: true, name: true, roles: true, active: true, sessionVersion: true } },
     },
   });
-  if (!link || !link.user.active) {
+  if (!link?.linkedAt || link.revokedAt || !link.user.active) {
     return NextResponse.json({ ok: true, found: false });
   }
   return NextResponse.json({
     ok: true,
     found: true,
+    binding: `${link.id}:${link.generation}:${link.user.sessionVersion}`,
     user: {
       id: link.user.id,
       name: link.user.name,

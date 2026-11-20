@@ -75,6 +75,7 @@ model User {
   telegram        String? // @username
   passwordHash    String
   sessionVersion  Int            @default(0)
+  accountRevision Int            @default(0)
   calendarEnabled Boolean?
   roles           Role[] // комбинированные роли (§4): права = объединение
   payScheme       PayScheme      @default(NONE)
@@ -275,6 +276,7 @@ model Product {
   // «108.» без суффикса → NULL) — для серверной сортировки внутри проекта
   suffixInt        Int?
   title            String // название изделия
+  titleRevision    Int    @default(0)
   quantity         Int          @default(1) // одинаковых экземпляров в карточке
   kind             String? // вид изделия (текстовое поле, из legacy f2641)
   status           ProductStatus @default(DRAFT)
@@ -842,10 +844,14 @@ model Payment {
   reportDocument   FinanceDocument? @relation(fields: [reportDocumentId], references: [id], onDelete: Restrict)
   reportDocuments  PaymentReportDocument[]
   stockPurchase    StockPurchase?
+  expenseReceipts  ExpenseReceipt[]
   logisticsAllocationId String? @unique
   logisticsAllocation LogisticsPostingAllocation? @relation(fields: [logisticsAllocationId], references: [id], onDelete: Restrict)
   deletionId       String?
   deletion         WarehouseMovementDeletion? @relation(fields: [deletionId], references: [id], onDelete: Restrict)
+  deletedAt        DateTime?
+  deletedById      String?
+  lastActionId     String? // Действующее изменение платежа для проверки зависимостей при откате.
   paidAt           DateTime         @default(now())
   comment          String?
   createdById      String?
@@ -1192,6 +1198,33 @@ model StockPurchase {
   @@index([actorId])
 }
 
+model ExpenseReceipt {
+  id                 String   @id @default(cuid())
+  paymentId          String
+  payment            Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  clientMutationId   String   @unique
+  requestFingerprint String
+  actorId            String
+  cancelledAt        DateTime?
+  createdAt          DateTime @default(now())
+  lines              ExpenseReceiptLine[]
+
+  @@index([paymentId])
+}
+
+model ExpenseReceiptLine {
+  id         String        @id @default(cuid())
+  receiptId  String
+  receipt    ExpenseReceipt @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  position   Int
+  movementId String        @unique
+  movement   StockMovement @relation(fields: [movementId], references: [id], onDelete: Restrict)
+  amount     Decimal       @db.Decimal(12, 2)
+  unitPrice  Decimal       @db.Decimal(27, 12)
+
+  @@unique([receiptId, position])
+}
+
 model WarehouseMovementDeletion {
   id String @id @default(uuid())
   clientMutationId String @unique
@@ -1212,6 +1245,7 @@ model StockMovement {
   type              StockMovementType
   receiptKind       StockReceiptKind? // NULL: исторический вид не подтверждён
   stockPurchase     StockPurchase?
+  expenseReceiptLine ExpenseReceiptLine?
   deletionId        String?
   deletion          WarehouseMovementDeletion? @relation("DeletedMovements", fields: [deletionId], references: [id], onDelete: Restrict)
   rootDeletion      WarehouseMovementDeletion? @relation("WarehouseDeletionRoot")
@@ -1350,6 +1384,7 @@ model NotificationPreference {
   userId  String
   type    String
   enabled Boolean @default(true)
+  revision Int @default(0)
 
   @@id([userId, type])
 }
@@ -1359,8 +1394,22 @@ model UserPreference {
   userId String
   key    String
   value  String
+  revision Int @default(0)
 
   @@id([userId, key])
+}
+
+// Прежний нормализованный выбор списка. В журнале хранится только ссылка.
+model SavedListChoiceRevision {
+  id                        String @id
+  userId                    String
+  section                   String
+  beforeQuery               String
+  beforeEngineerInitialized Boolean
+  afterRevision             String
+  createdAt                 DateTime @default(now())
+
+  @@index([userId, section])
 }
 
 // ─── Плагинное ядро (§14) ────────────────────────────────────────────────────
@@ -1485,6 +1534,15 @@ model ChangeLog {
   presentation Json? // Версионированное безопасное представление, исходные факты выше неизменны.
   searchText String? // Полный безопасный текст события; pg_trgm index в SQL migration.
 
+  operationRootId String?
+  operationRoot   ChangeLog? @relation("OperationEntries", fields: [operationRootId], references: [id], onDelete: Restrict)
+  operationEntries ChangeLog[] @relation("OperationEntries")
+  reversal Json?
+  reversesId String? @unique
+  reverses ChangeLog? @relation("JournalReversal", fields: [reversesId], references: [id], onDelete: Restrict)
+  reversedBy ChangeLog? @relation("JournalReversal")
+
+  @@index([operationRootId])
   @@index([entity, entityId, createdAt])
   @@index([createdAt])
 }
@@ -1504,8 +1562,20 @@ model TelegramLink {
   linkCode          String?   @unique // одноразовый код до подтверждения ботом
   linkCodeExpiresAt DateTime?
   linkedAt          DateTime?
+  generation        Int @default(0)
+  revokedAt         DateTime?
+  challenges        TelegramLinkChallenge[]
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
+}
+
+model TelegramLinkChallenge {
+  digest    String @id
+  linkId    String
+  link      TelegramLink @relation(fields: [linkId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  createdAt DateTime @default(now())
+
+  @@index([linkId])
 }
 
 // Личный план: owner всегда текущий session actor.
@@ -1584,6 +1654,7 @@ model TelegramReminderOutbox {
  chatIdSnapshot String
  linkIdSnapshot String
  linkedAtSnapshot DateTime @db.Timestamptz(3)
+ linkGenerationSnapshot Int @default(0)
  state TelegramReminderState @default(READY)
  attempts Int @default(0)
  claimId String? @unique

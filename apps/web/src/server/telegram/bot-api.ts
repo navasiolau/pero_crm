@@ -37,16 +37,21 @@ export async function resolveBotActor(
       { status: 400 },
     );
   }
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { id: true, name: true, roles: true, active: true },
+  const link = await prisma.telegramLink.findUnique({
+    where: { userId },
+    select: {
+      id: true, generation: true, linkedAt: true, revokedAt: true, chatId: true,
+      user: { select: { id: true, name: true, roles: true, active: true, sessionVersion: true } },
+    },
   });
-  if (!user || !user.active) {
-    return NextResponse.json(
-      { ok: false, error: "Пользователь не найден или неактивен" },
-      { status: 403 },
-    );
+  const supplied = request.headers.get("x-telegram-binding");
+  const expected = link ? `${link.id}:${link.generation}:${link.user.sessionVersion}` : null;
+  const strict = process.env.PERO_REQUIRE_TELEGRAM_BINDING_GENERATION === "1";
+  if (!link?.chatId || !link.linkedAt || link.revokedAt || !link.user.active ||
+      ((strict || supplied !== null) && supplied !== expected)) {
+    return NextResponse.json({ ok: false, error: "Действующая привязка Telegram не найдена" }, { status: 403 });
   }
+  const user = link.user;
   return { id: user.id, name: user.name, roles: user.roles, source: "telegram" };
 }
 

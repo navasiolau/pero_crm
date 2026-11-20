@@ -40,7 +40,7 @@ export async function withWarehouseWrite<T>(operation:(tx:Tx)=>Promise<T>,databa
 }
 export type WarehouseActor={id:string;name?:string|null;roles:Role[];source?:"web"|"telegram"|"api"};
 export type WarehouseMovementInput={kind:'INCOME'|'EXPENSE'|'RETURN';clientMutationId:string;materialId?:string;projectMaterialId?:string;productId?:string;quantity:string|number;unitPrice?:string|number;sourceMovementId?:string;comment?:string};
-export async function warehouseMove(tx:Tx,actor:WarehouseActor,input:WarehouseMovementInput,paidReceipt?:{bynAmount:string;purchase?:{
+export async function warehouseMove(tx:Tx,actor:WarehouseActor,input:WarehouseMovementInput,paidReceipt?:{bynAmount:string;operationRootId?:string;purchase?:{
  currency:string;unitPrice:string;amount:string;cashAccountId:string;cashAccount:string;expenseArticleId:string|null;
  rate:string;rateDate:string|null;paidAt:string;reportDocumentIds:readonly string[];
 }}){
@@ -109,7 +109,7 @@ export async function warehouseMove(tx:Tx,actor:WarehouseActor,input:WarehouseMo
  await tx.$executeRaw`UPDATE "Material" SET "purchasePrice"=CAST(${averagePrice(result.position)} AS numeric) WHERE id=${materialId}`;
  if(line)await tx.projectMaterial.update({where:{id:line.id},data:{issuedQty:input.kind==='EXPENSE'?{increment:quantity}:{decrement:quantity}}});
  const eventId='warehouse94-'+clientMutationId;
- await writeChangeLogInTransaction(tx, {id:eventId,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,source:actor.source,entity:'stockMovement',entityId:movement.id,action:'create',newValue:{type:input.kind,receiptKind:movement.receiptKind,material:material.name,quantity,unitPrice:movement.unitPrice?.toString()??null}},
+ await writeChangeLogInTransaction(tx, {id:eventId,operationRootId:paidReceipt?.operationRootId,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,source:actor.source,entity:'stockMovement',entityId:movement.id,action:'create',newValue:{type:input.kind,receiptKind:movement.receiptKind,material:material.name,quantity,unitPrice:movement.unitPrice?.toString()??null}},
   {entity:{label:`${input.kind==='INCOME'?'Приход':input.kind==='EXPENSE'?'Выдача':'Возврат'} материала ${material.name}`},contexts:product?[journalProductContext(product)]:[],
    links:[{type:'material',id:material.id,label:material.name},...(product?[{type:'product',...journalProductContext(product)}]:[]),
     ...(paidReceipt?.purchase?[{type:'cashAccount',id:paidReceipt.purchase.cashAccountId,label:paidReceipt.purchase.cashAccount}]:[])],

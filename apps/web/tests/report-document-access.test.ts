@@ -15,3 +15,20 @@ test('warehouse returns the complete ordered set once and hides every file from 
  assert.equal((await loadMovementReportDocumentSets({roles:['WORKER']},['paid'],db)).size,0);assert.equal(reads,0);
  const result=await loadMovementReportDocumentSets({roles:['PROCUREMENT']},['paid'],db);assert.equal(result.size,1);assert.deepEqual(result.get('paid'),files);
 });
+
+test("each receipt line resolves the same authorized original payment documents", async () => {
+  const receipt = { payment: { reportDocument: { ...file, state: "READY" } } };
+  let reads = 0;
+  const db = {
+    stockPurchase: { findMany: async () => [] },
+    expenseReceiptLine: { findMany: async () => {
+      reads++;
+      return [{ movementId: "one", receipt }, { movementId: "two", receipt }];
+    } },
+  } as unknown as Parameters<typeof loadMovementReportDocumentSets>[2];
+  assert.equal((await loadMovementReportDocumentSets({ roles: ["MANAGER"] }, ["one", "two"], db)).size, 0);
+  assert.equal(reads, 0);
+  const found = await loadMovementReportDocumentSets({ roles: ["ACCOUNTANT"] }, ["one", "two"], db);
+  assert.deepEqual([...found], [["one", [file]], ["two", [file]]]);
+  assert.equal(reads, 1);
+});

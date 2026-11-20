@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import test from "node:test";
 import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
@@ -304,37 +304,45 @@ test("security.routes: credentials, Bearer, Telegram и команды чере�
   });
   await t.test("telegram/link-session-unlink: expiry/occupied/inactive/replay и разрешённая привязка ENGINEER", async () => {
     const engineer = await f.user("telegram-engineer", ["ENGINEER"]), disabled = await f.user("telegram-disabled", ["MANAGER"], { active: false });
-    const occupied = f.id("occupied-chat"), chatId = f.id("engineer-chat");
+    const chatId = String(1 + Number.parseInt(randomUUID().replaceAll("-", "").slice(0, 12), 16));
+    const occupied = String(Number(chatId) + 1);
     await f.db.telegramLink.create({ data: { userId: owner.id, chatId: occupied, linkedAt: new Date() } });
-    const link = await f.db.telegramLink.create({ data: { userId: engineer.id, linkCode: f.id("valid-code"), linkCodeExpiresAt: new Date(Date.now() + 60_000) } });
+    const linkCode = randomBytes(18).toString("base64url"), expiredCode = randomBytes(18).toString("base64url"), inactiveCode = randomBytes(18).toString("base64url");
+    const digest = (code: string) => createHash("sha256").update("telegram-link:").update(code).digest("hex");
+    const link = await f.db.telegramLink.create({ data: { userId: engineer.id, linkCode: digest(linkCode), linkCodeExpiresAt: new Date(Date.now() + 60_000) } });
     const expiredUser = await f.user("telegram-expired", ["MANAGER"]);
-    const expired = await f.db.telegramLink.create({ data: { userId: expiredUser.id, linkCode: f.id("expired-code"), linkCodeExpiresAt: new Date(Date.now() - 60_000) } });
-    const inactive = await f.db.telegramLink.create({ data: { userId: disabled.id, linkCode: f.id("inactive-code"), linkCodeExpiresAt: new Date(Date.now() + 60_000) } });
+    await f.db.telegramLink.create({ data: { userId: expiredUser.id, linkCode: digest(expiredCode), linkCodeExpiresAt: new Date(Date.now() - 60_000) } });
+    await f.db.telegramLink.create({ data: { userId: disabled.id, linkCode: digest(inactiveCode), linkCodeExpiresAt: new Date(Date.now() + 60_000) } });
     const baseline = await f.db.telegramLink.findMany({ orderBy: { id: "asc" } });
     for (const [path, method, body, wrong] of [
-      ["/api/v1/bot/link", "POST", { code: link.linkCode, chatId }, read],
+      ["/api/v1/bot/link", "POST", { code: linkCode, chatId }, read],
       ["/api/v1/bot/unlink", "DELETE", { chatId }, read],
       [`/api/v1/bot/session?chatId=${encodeURIComponent(chatId)}`, "GET", undefined, write],
     ] as const) {
       assert.equal((await api(path, undefined, method, body)).status, 401);
       assert.equal((await api(path, wrong.raw, method, body)).status, 403);
     }
-    for (const [code, target, status] of [[f.id("unknown-code"), chatId, 400], [expired.linkCode!, chatId, 400], [inactive.linkCode!, chatId, 403], [link.linkCode!, occupied, 400]] as const) {
+    for (const [code, target, status] of [[randomBytes(18).toString("base64url"), chatId, 400], [expiredCode, chatId, 400], [inactiveCode, chatId, 403], [linkCode, occupied, 400], [linkCode, `-${chatId}`, 400]] as const) {
       assert.equal((await api("/api/v1/bot/link", write.raw, "POST", { code, chatId: target })).status, status);
       assert.deepEqual(await f.db.telegramLink.findMany({ orderBy: { id: "asc" } }), baseline);
     }
-    const linked = await api("/api/v1/bot/link", write.raw, "POST", { code: link.linkCode, chatId, username: "fixture" }); assert.equal(linked.status, 200);
+    const linked = await api("/api/v1/bot/link", write.raw, "POST", { code: linkCode, chatId, username: "fixture" }); assert.equal(linked.status, 200);
     assert.deepEqual((await linked.json()).user, { id: engineer.id, name: engineer.name, roles: ["ENGINEER"], botAllowed: false });
     const saved = await f.db.telegramLink.findUniqueOrThrow({ where: { userId: engineer.id } });
     assert.equal(saved.chatId, chatId); assert.equal(saved.linkCode, null); assert.equal(saved.linkCodeExpiresAt, null); assert.ok(saved.linkedAt);
-    assert.equal((await api("/api/v1/bot/link", write.raw, "POST", { code: link.linkCode, chatId })).status, 400);
+    assert.equal((await api("/api/v1/bot/link", write.raw, "POST", { code: linkCode, chatId })).status, 400);
     const found = () => api(`/api/v1/bot/session?chatId=${encodeURIComponent(chatId)}`, read.raw);
     assert.equal((await (await found()).json()).found, true);
     await f.db.user.update({ where: { id: engineer.id }, data: { active: false } }); assert.equal((await (await found()).json()).found, false);
     await f.db.user.update({ where: { id: engineer.id }, data: { active: true } });
     const unlinked = await api("/api/v1/bot/unlink", write.raw, "DELETE", { chatId }); assert.equal(unlinked.status, 200);
     assert.deepEqual(await unlinked.json(), { ok: true, deleted: 1 }); assert.equal((await (await found()).json()).found, false);
-    assert.equal(await f.db.telegramLink.findUnique({ where: { userId: engineer.id } }), null);
+    const tombstone = await f.db.telegramLink.findUniqueOrThrow({ where: { userId: engineer.id } });
+    assert.equal(tombstone.id, link.id);
+    assert.equal(tombstone.chatId, null);
+    assert.equal(tombstone.linkCode, null);
+    assert.ok(tombstone.revokedAt);
+    assert.equal(tombstone.generation, saved.generation + 1);
   });
   await t.test("plugins/commands: 404/disabled409, настоящий ping и error500 с run-log", async () => {
     const original = await f.db.plugin.findUniqueOrThrow({ where: { id: "demo" } }), settings = await f.db.pluginSetting.findMany({ where: { pluginId: "demo" }, orderBy: { key: "asc" } });

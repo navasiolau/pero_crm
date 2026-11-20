@@ -32,6 +32,20 @@ test("повреждённый снимок не применяется, зап�
   assert.deepEqual(readKanbanPosition("denied-user", "products", position.query, denied), position);
 });
 
+test("мини-канбаны хранят отдельные позиции для каждого проекта и пользователя", () => {
+  const tab = storage();
+  writeKanbanPosition("actor", "projects/A", position, tab);
+  writeKanbanPosition("actor", "projects/B", { ...position, left: 900 }, tab);
+  writeKanbanPosition("actor", "projects", { ...position, left: 25 }, tab);
+  writeKanbanPosition("actor", "products", { ...position, left: 42 }, tab);
+
+  assert.equal(readKanbanPosition("actor", "projects/A", position.query, tab)?.left, 431);
+  assert.equal(readKanbanPosition("actor", "projects/B", position.query, tab)?.left, 900);
+  assert.equal(readKanbanPosition("actor", "projects", position.query, tab)?.left, 25);
+  assert.equal(readKanbanPosition("actor", "products", position.query, tab)?.left, 42);
+  assert.equal(readKanbanPosition("other", "projects/A", position.query, tab), null);
+});
+
 test("ссылка проекта возвращает канонические параметры и ограничивает назначение", () => {
   const href = new URL(projectDetailHref("project/1", "active=0&view=kanban&client=client&unknown=discard"), "https://crm.invalid");
   assert.equal(href.pathname, "/projects/project%2F1");
