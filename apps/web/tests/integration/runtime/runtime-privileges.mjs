@@ -42,6 +42,12 @@ export function proveRuntimePrivileges(target) {
     requireCi(JSON.stringify(violations()) === '["sequence_mutation"]', 'runtime-role-detects-sequence-update');
     owner(`REVOKE UPDATE ON SEQUENCE public.pero_ci_sequence_probe FROM "${login}"`);
     requireCi(JSON.stringify(violations()) === '[]', 'runtime-role-sequence-restored');
+    owner(`GRANT MAINTAIN ON TABLE public."Project" TO "${login}"`);
+    try {
+      requireCi(JSON.stringify(violations()) === '["table_mutation"]', 'runtime-role-detects-postgres17-maintain');
+    } finally {
+      owner(`REVOKE MAINTAIN ON TABLE public."Project" FROM "${login}"`);
+    }
     owner("CREATE FUNCTION public.pero_ci_no_access() RETURNS integer LANGUAGE sql SECURITY DEFINER AS 'SELECT 7'");
     const result = restricted(`
       BEGIN;
