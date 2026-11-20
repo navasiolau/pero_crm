@@ -29,6 +29,7 @@ export function proveRuntimePrivileges(target) {
     END
     $check$;
     ROLLBACK;`);
+  owner(`REVOKE EXECUTE ON FUNCTION public.kp_valid_state(jsonb), public.pero_runtime_role_violations() FROM "${facts.group}"`);
   owner('SELECT public.pero_refresh_runtime_grants()');
   owner(`CREATE ROLE "${login}" LOGIN NOSUPERUSER NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '${synthetic}';
     GRANT "${facts.group}" TO "${login}" WITH INHERIT TRUE, SET FALSE, ADMIN FALSE;`);
@@ -38,6 +39,10 @@ export function proveRuntimePrivileges(target) {
     owner('CREATE SEQUENCE public.pero_ci_sequence_probe');
     const violations = () => JSON.parse(restricted('SELECT to_json(public.pero_runtime_role_violations())'));
     requireCi(JSON.stringify(violations()) === '[]', 'runtime-role-mixed-catalog');
+    requireCi(restricted(`SELECT public.kp_valid_state('{"items":[]}'::jsonb)
+      AND public.kp_json_object_array('[]'::jsonb)
+      AND has_function_privilege(current_user, 'public.kp_valid_storage_binding(jsonb)', 'EXECUTE')
+      AND has_function_privilege(current_user, 'public.kp_valid_object_key(text)', 'EXECUTE')`) === 't', 'runtime-proposal-check-functions');
     owner(`GRANT UPDATE ON SEQUENCE public.pero_ci_sequence_probe TO "${login}"`);
     requireCi(JSON.stringify(violations()) === '["sequence_mutation"]', 'runtime-role-detects-sequence-update');
     owner(`REVOKE UPDATE ON SEQUENCE public.pero_ci_sequence_probe FROM "${login}"`);
