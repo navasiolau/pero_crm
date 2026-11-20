@@ -22,7 +22,7 @@ CREATE TRIGGER "Material_catalog_revision" BEFORE UPDATE ON "Material" FOR EACH 
 CREATE TRIGGER "MaterialUnit_catalog_revision" BEFORE UPDATE ON "MaterialUnit" FOR EACH ROW EXECUTE FUNCTION "increment_warehouse_catalog_revision"();
 CREATE TRIGGER "ProjectMaterial_catalog_revision" BEFORE UPDATE ON "ProjectMaterial" FOR EACH ROW EXECUTE FUNCTION "increment_warehouse_catalog_revision"();
 
-CREATE FUNCTION "check_warehouse_material_live_unit"() RETURNS trigger LANGUAGE plpgsql AS $
+CREATE FUNCTION "check_warehouse_material_live_unit"() RETURNS trigger LANGUAGE plpgsql AS $live_unit$
 DECLARE archived_at TIMESTAMP(3);
 BEGIN
   SELECT "deletedAt" INTO archived_at FROM "MaterialUnit" WHERE "id" = NEW."unitId" FOR SHARE;
@@ -30,6 +30,6 @@ BEGIN
     RAISE EXCEPTION 'WAREHOUSE_UNIT_ARCHIVED' USING ERRCODE = '23514';
   END IF;
   RETURN NEW;
-END $;
+END $live_unit$;
 CREATE TRIGGER "Material_live_unit" BEFORE INSERT OR UPDATE OF "unitId" ON "Material"
   FOR EACH ROW EXECUTE FUNCTION "check_warehouse_material_live_unit"();
