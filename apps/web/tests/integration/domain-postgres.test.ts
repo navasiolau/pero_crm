@@ -268,7 +268,7 @@ before(async () => {
   } });
   // Child targets загружаются раньше родителей: guardedModuleCache сохраняет installed entry каждого target.
   const names = ["transactions/coordinator", "time/timers", "access/visibility", "access/notification-visibility", "tasks/workspace-contract", "prices/actions", "works/core", "works/update-core", "works/queries", "tasks/worker-allocation-core", "tasks/piecework-core", "tasks/task-reassignment-core",
-    "tasks/queries", "warehouse/unit-core", "warehouse/norm-core", "warehouse/queries", "products/delete-core", "products/core", "projects/stage-core", "projects/delete-core",
+    "tasks/queries", "warehouse/unit-core", "warehouse/norm-core", "warehouse/queries", "products/delete-core", "products/core", "projects/project-field-core", "projects/stage-core", "projects/delete-core",
     "products/status-core", "products/queries", "projects/queries", "product-percentage-pay/queries", "changelog/queries", "calendar/core", "calendar/analytics", "tasks/completion-core", "tasks/actions", "warehouse/accounting", "warehouse/expense-receipt-core", "changelog/reversal-core", "warehouse/actions", "time/actions", "payments/service", "projects/core", "kp/proposal-core", "plugins/sync", "telegram/mutation-core"];
   const effect = (name: string) => () => { const probe = current().mutation; if (probe) { probe.effects.push(name); throw Error("CI133_INJECTED_OPTIONAL_EFFECT"); } };
   const overrides = { "../src/auth": { auth: async () => current().unauthenticated ? null : ({ user: current().actor }) },
@@ -282,6 +282,7 @@ before(async () => {
   visibility = scope.load("../src/server/access/visibility"); notifications = scope.load("../src/server/access/notification-visibility");
   stock = scope.load("../src/server/warehouse/accounting");
   scope.load("../src/server/warehouse/expense-receipt-core");
+  scope.load("../src/server/projects/project-field-core");
   priceActions = scope.load("../src/server/prices/actions");
   worksCore = scope.load("../src/server/works/core");
   workUpdate = scope.load("../src/server/works/update-core"); workQueries = scope.load("../src/server/works/queries");
