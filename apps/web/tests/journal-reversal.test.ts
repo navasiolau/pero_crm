@@ -96,8 +96,9 @@ test("ABA, including a newer undo returning identical text, leaves older actions
   const second = await f.rename("Б", "В");
   await f.transaction(tx => reverseJournalActionInTransaction(tx, actor.id, f.request(second)));
   assert.equal(f.product.title, "Б");
-  await assert.rejects(() => previewJournalReversalInTransaction(f.tx, actor.id, f.request(first)), /поле изменилось/);
-  await assert.rejects(() => f.transaction(tx => reverseJournalActionInTransaction(tx, actor.id, f.request(first))), /поле изменилось/);
+  const conflict = { message: "После этого действия поле изменилось", href: "/changelog?q=product" };
+  await assert.rejects(() => previewJournalReversalInTransaction(f.tx, actor.id, f.request(first)), conflict);
+  await assert.rejects(() => f.transaction(tx => reverseJournalActionInTransaction(tx, actor.id, f.request(first))), conflict);
 });
 
 test("child resolves its root, scoped and live role checks precede changes, audit faults roll back", async () => {
@@ -110,12 +111,12 @@ test("child resolves its root, scoped and live role checks precede changes, audi
   const request = f.request("child");
   assert.equal((await previewJournalReversalInTransaction(f.tx, actor.id, request)).entryId, root);
   await assert.rejects(() => previewJournalReversalInTransaction(f.tx, actor.id,
-    { ...request, scope: { kind: "product", id: "other-product" } }), /не найдена/);
+    { ...request, scope: { kind: "product", id: "other-product" } }), { message: "Запись журнала не найдена", href: undefined });
   f.changeRole("ACCOUNTANT");
-  await assert.rejects(() => f.transaction(tx => reverseJournalActionInTransaction(tx, actor.id, request)), /Недостаточно прав/);
+  await assert.rejects(() => f.transaction(tx => reverseJournalActionInTransaction(tx, actor.id, request)), { message: "Недостаточно прав", href: undefined });
   f.changeRole("ADMIN");
   f.failAudit();
-  await assert.rejects(() => f.transaction(tx => reverseJournalActionInTransaction(tx, actor.id, request)), /audit fault/);
+  await assert.rejects(() => f.transaction(tx => reverseJournalActionInTransaction(tx, actor.id, request)), (error: unknown) => error instanceof Error && error.message === "audit fault" && !("href" in error));
   assert.equal(f.product.title, "Б");
   assert.equal(f.product.titleRevision, 1);
   assert.equal(f.rows.size, 2);

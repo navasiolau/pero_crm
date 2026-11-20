@@ -12,6 +12,16 @@ const commandSchema = z.object({ kind: z.string(), version: z.number().int(), da
 const entrySchema = z.object({ entryId: z.string().min(1).max(200), scope: z.unknown() });
 const requestSchema = entrySchema.extend({ requestId: z.string().uuid() });
 
+async function withEntityHistory<T>(entityId: string, operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof JournalReversalRefusal && !error.href)
+      throw new JournalReversalRefusal(error.message, "/changelog?q=" + encodeURIComponent(entityId));
+    throw error;
+  }
+}
+
 async function loadReversal(tx: Prisma.TransactionClient, actorId: string, input: z.infer<typeof entrySchema>) {
   const user = await tx.user.findUnique({
     where: { id: actorId },
@@ -44,8 +54,10 @@ export async function previewJournalReversalInTransaction(tx: Prisma.Transaction
   const { root, handler, presentation, ctx } = await loadReversal(tx, actorId, entrySchema.parse(input));
   if (await tx.changeLog.findUnique({ where: { reversesId: root.id }, select: { id: true } }))
     throw new JournalReversalRefusal("Действие уже отменено");
-  const reason = await handler.preview(ctx);
-  if (reason) throw new JournalReversalRefusal(reason);
+  await withEntityHistory(root.entityId, async () => {
+    const reason = await handler.preview(ctx);
+    if (reason) throw new JournalReversalRefusal(reason);
+  });
   return { entryId: root.id, entityLabel: presentation.entity.label, actionLabel: presentation.action.label };
 }
 
@@ -64,7 +76,7 @@ export async function reverseJournalActionInTransaction(tx: Prisma.TransactionCl
   }
   if (await tx.changeLog.findUnique({ where: { reversesId: root.id }, select: { id: true } }))
     throw new JournalReversalRefusal("Действие уже отменено");
-  const effect = await handler.apply({ ...ctx, reversalId });
+  const effect = await withEntityHistory(root.entityId, () => handler.apply({ ...ctx, reversalId }));
   await writeChangeLogInTransaction(tx, {
     id: reversalId, reversesId: root.id, reversal: effect.reversal,
     actorType: "user", actorId, actorName: ctx.actor.name, source: ctx.actor.source,
