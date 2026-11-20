@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { headers } from "next/headers";
+import { TelegramFileViewerScope } from "@/components/file-viewer";
 import { TelegramFinanceLinkSettings } from "@/components/telegram-finance-link-settings";
 import { scopedFinanceAuth } from "@/server/telegram/finance-session";
 import { TELEGRAM_FINANCE_LAYOUT_HEADER } from "@/server/telegram/finance-security";
@@ -35,7 +36,7 @@ export default async function AppLayout({
             <TelegramFinanceLinkSettings />
           </nav>
         </header>
-        <main className="mx-auto min-w-0 max-w-7xl px-4 py-5">{children}</main>
+        <main className="mx-auto min-w-0 max-w-7xl px-4 py-5"><TelegramFileViewerScope>{children}</TelegramFileViewerScope></main>
       </div>
     );
   }

@@ -27,7 +27,7 @@ export function FileListRow({file, onDelete, onDeleted, onBusyChange, disabled =
   const nameClass = cn("min-w-0 flex-1 whitespace-normal break-all text-left text-sm underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring", filenameTone === "red" && "text-red-600 dark:text-red-400");
   return <div data-file-list-row={file.id} data-file-id={file.id} data-file-source={file.source ?? "project"} role="listitem" className={cn("flex min-w-0 items-center gap-2 py-1", className)}
     onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
-    {file.mimeType.startsWith("image/") || file.source === "proposal" ? (
+    {file.mimeType.startsWith("image/") || file.source === "proposal" || viewer.previewsProtectedPdf(file) ? (
       <button type="button" className={nameClass} onClick={() => viewer.open(file)}>{file.fileName}</button>
     ) : (
       <a href={getViewableFileSource(file)} download={file.fileName} className={nameClass}>{file.fileName}</a>
