@@ -16,7 +16,10 @@ function fixture() {
   let role: Role = "DIRECTOR";
   let failAudit = false;
   const tx = {
-    $queryRaw: async () => [],
+    $queryRaw: async (query: TemplateStringsArray) => {
+      assert.doesNotMatch(query.join(" "), /FROM\s+"ChangeLog".*FOR\s+(?:NO KEY )?UPDATE/i);
+      return [];
+    },
     user: { findUnique: async () => ({ ...actor, roles: [role], active: true }) },
     product: {
       findFirst: async () => product.deletedAt ? null : { ...product },
