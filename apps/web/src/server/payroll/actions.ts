@@ -16,6 +16,7 @@ import { prisma } from "@/lib/prisma";
 import { formatAmount } from "@/lib/format";
 import { ADVANCE_ROLES, PAYROLL_MANAGE_ROLES } from "@/lib/roles";
 import { deletePayoutInTransaction } from "./payout-reversal";
+import { PayoutPermissionError } from "./cash-core";
 import { dispatchEvent } from "@/server/plugins/events";
 import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
 import { requireAdmin, requireFinance, requirePayrollManagement, requireFinanceRole } from "@/server/require-role";
@@ -84,6 +85,7 @@ export async function deletePayout(
     await withTaskTransaction(tx => deletePayoutInTransaction(tx,
       { id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: financeSessionSource(session) }, payoutId));
   } catch (error) {
+    if (error instanceof PayoutPermissionError) throw error;
     return { ok: false, error: error instanceof Error ? error.message : "Не удалось удалить выплату" };
   }
   revalidatePayroll();

@@ -132,41 +132,72 @@ test("salary actions allow payroll managers including procurement plus accountan
       } },
       "../src/server/payroll/queries": { isValidMonth: () => true, readPayrollSummary: async () => ({}),
         getEmployeeDues: async () => { calls.push("dues"); return []; }, getOrgBalance: async () => 100 },
-      "../src/server/finance/queries": { listCashAccounts: async () => [{ id: "cash", active: true, currency: "BYN" }] },
-    });
+    }, { payrollPayoutBatch: { findUnique: async ({ where }: { where: { id: string } }) => {
+      assert.equal(where.id, salary.requestId);
+      calls.push("receipt");
+      return null;
+    } } });
     await fixture.run(async () => {
       const actions = fixture.load<typeof import("../src/server/payroll/actions")>("../src/server/payroll/actions");
       assert.equal((await actions.addPayout({ ...salary, month: "2000-01" })).ok, true);
       assert.deepEqual(await actions.accrueTurnover("2000-01"), { ok: true, accruedCount: 0 });
-      assert.match((await actions.settleAll("2000-01", "cash")).error!, /Задолженности.*нет/);
-      assert.deepEqual(calls, ["payout", "accrue", "dues"]);
+      assert.match((await actions.settleAll("2000-01", "cash", salary.requestId)).error!, /Задолженности.*нет/);
+      assert.deepEqual(calls, ["payout", "accrue", "receipt", "dues"]);
     });
   }
 });
 
-test("payout deletion reads only kind before rejecting salary and still deletes procurement advances", async () => {
-  for (const roles of [...deniedRoles, ["PROCUREMENT", "ACCOUNTANT"] as Role[]]) {
+test("payout deletion checks kind before exposing details and acknowledges a reversible cancellation", async () => {
+  for (const roles of [...deniedRoles, ...allowedRoles]) {
     for (const kind of ["SALARY", "ADVANCE"] as const) {
       const calls: string[] = [];
+      const revalidated: string[] = [];
+      const row = { id: "payout", userId: "recipient", kind, user: { name: "Сотрудник" }, cashAccountId: null, cashAccount: null,
+        amount: new Prisma.Decimal(5), cashAmount: new Prisma.Decimal(5), cashCurrency: "BYN", month: "2000-01",
+        deletedAt: null as Date | null, deletedById: null as string | null, lastActionId: "issued" };
       const tx = { payout: {
-        findUnique: async (args: { select?: { kind: boolean } }) => {
+        findUnique: async (args: { select?: { kind: boolean }; where: { id: string; deletedAt: null; kind?: string } }) => {
+          assert.deepEqual(args.where, { id: row.id, deletedAt: null, ...(args.select ? {} : { kind }) });
           if (args.select) { assert.deepEqual(args.select, { kind: true }); calls.push("kind"); return { kind }; }
-          calls.push("details"); return { id: "payout", userId: "recipient", kind, user: { name: "Сотрудник" }, cashAccountId: null, cashAccount: null,
-            amount: new Prisma.Decimal(5), cashAmount: new Prisma.Decimal(5), cashCurrency: "BYN", month: "2000-01" };
+          calls.push("details");
+          return { ...row };
         },
-        delete: async () => { calls.push("delete"); },
-      }, changeLog: { create: async () => { calls.push("audit"); } } };
+        updateMany: async ({ where, data }: {
+          where: { id: string; kind: string; deletedAt: null; lastActionId: string };
+          data: { deletedAt: Date; deletedById: string; lastActionId: string };
+        }) => {
+          assert.deepEqual(where, { id: row.id, kind, deletedAt: null, lastActionId: "issued" });
+          assert.ok(data.deletedAt instanceof Date);
+          assert.equal(data.deletedById, actor(roles).id);
+          calls.push("void"); Object.assign(row, data); return { count: 1 };
+        },
+      }, changeLog: { create: async ({ data }: { data: {
+        id: string; entityId: string; action: string; reversal: { kind: string; data: { visible: boolean } };
+      } }) => {
+        assert.equal(data.id, row.lastActionId);
+        assert.equal(data.entityId, row.id);
+        assert.equal(data.action, "delete");
+        assert.equal(data.reversal.kind, "payout.visibility");
+        assert.equal(data.reversal.data.visible, true);
+        calls.push("audit");
+      } } };
       const fixture = sessionFixture(roles, ["../src/server/payroll/actions"], {
         "../src/server/tasks/transaction": { withTaskTransaction: async (operation: (tx: object) => Promise<unknown>) => operation(tx) },
+        "next/cache": { revalidatePath: (path: string) => { revalidated.push(path); } },
       });
       await fixture.run(async () => {
         const { deletePayout } = fixture.load<typeof import("../src/server/payroll/actions")>("../src/server/payroll/actions");
-        if (kind === "SALARY" && !roles.includes("ACCOUNTANT")) {
+        if (kind === "SALARY" && deniedRoles.includes(roles)) {
           await assert.rejects(deletePayout("payout"), /Недостаточно прав/);
           assert.deepEqual(calls, ["kind"]);
+          assert.equal(row.deletedAt, null);
+          assert.deepEqual(revalidated, []);
         } else {
           assert.deepEqual(await deletePayout("payout"), { ok: true });
-          assert.deepEqual(calls, ["kind", "details", "delete", "audit"]);
+          assert.deepEqual(calls, ["kind", "details", "void", "audit"]);
+          assert.ok(row.deletedAt instanceof Date);
+          assert.equal(row.amount.toFixed(2), "5.00");
+          assert.ok(revalidated.includes(kind === "SALARY" ? "/finance/payroll" : "/finance/advances"));
         }
       });
     }

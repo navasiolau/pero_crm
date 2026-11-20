@@ -88,15 +88,17 @@ function hints(row: StoredPayout, visible: boolean) {
 }
 
 async function setVisibility(tx: Prisma.TransactionClient, row: Payout, actorId: string, visible: boolean, nextHead: string | null) {
-  const updated = await tx.payout.updateMany({ where: { id: row.id, deletedAt: row.deletedAt, lastActionId: row.lastActionId },
+  const updated = await tx.payout.updateMany({ where: { id: row.id, kind: row.kind, deletedAt: row.deletedAt, lastActionId: row.lastActionId },
     data: { deletedAt: visible ? null : new Date(), deletedById: visible ? null : actorId, lastActionId: nextHead } });
   if (updated.count !== 1) throw new JournalReversalRefusal("Выплата уже изменена");
 }
 
 export async function deletePayoutInTransaction(tx: Prisma.TransactionClient, actor: PayoutActor, id: string) {
-  const payout = await tx.payout.findUnique({ where: { id, deletedAt: null }, include: selection });
+  const target = await tx.payout.findUnique({ where: { id, deletedAt: null }, select: { kind: true } });
+  if (!target) throw Error("Выплата не найдена");
+  assertPayoutRole(actor, target.kind);
+  const payout = await tx.payout.findUnique({ where: { id, deletedAt: null, kind: target.kind }, include: selection });
   if (!payout) throw Error("Выплата не найдена");
-  assertPayoutRole(actor, payout.kind);
   const actionId = randomUUID();
   const reversal = payoutVisibilityCommand([payout], true, actionId);
   await setVisibility(tx, payout, actor.id, false, actionId);
