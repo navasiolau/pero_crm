@@ -11,17 +11,6 @@ const root = exportAt >= 0 && process.argv[exportAt + 1]
 const methods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const models = new Set([...readFileSync(resolve(root, "prisma/schema.prisma"), "utf8").matchAll(/^model (\w+)/gm)]
   .map(([, name]) => name[0].toLowerCase() + name.slice(1)));
-const retainedDuringIntegration = new Map(Object.entries({
-  "server/logistics/core.ts": 2,
-  "server/payroll/actions.ts": 1,
-  "server/tasks/actions.ts": 1,
-  "server/tasks/delete-core.ts": 2,
-  "server/telegram/mutation-core.ts": 1,
-  "server/warehouse/actions.ts": 1,
-  "server/warehouse/unit-core.ts": 1,
-  "server/works/actions.ts": 1,
-}));
-
 function* sourceFiles(relative = "") {
   for (const dir of readdirSync(resolve(root, "src", relative), { withFileTypes: true })) {
     const path = relative ? relative + "/" + dir.name : dir.name;
@@ -90,7 +79,7 @@ if (exportAt >= 0) {
     const unknown = [], destructive = [];
     for (const [path, result] of inventory) {
       for (const name of result.names) if (!allowed[path]?.includes(name)) unknown.push(path + "#" + name);
-      if (result.destructive > (retainedDuringIntegration.get(path) ?? 0)) destructive.push(path);
+      if (result.destructive) destructive.push(path);
     }
     assert.deepEqual(unknown, [], "Проверьте корень операции и обратимость, затем обновите инвентарь");
     assert.deepEqual(destructive, [], "Используйте доменное мягкое удаление");
