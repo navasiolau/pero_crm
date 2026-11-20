@@ -440,11 +440,14 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     }
     const hiddenMovement = await f.request("/warehouse/movements", manager); assert.equal(hiddenMovement.status, 200);
     const hiddenHtml = await hiddenMovement.text(); assert.ok(!hiddenHtml.includes(docs[0].id)); assert.ok(!hiddenHtml.includes(docs[0].name));
-    await f.db.financeDocument.update({ where: { id: docs[0].id }, data: { state: "PENDING", readyAt: null } });
-    assert.ok((await listMovements(reader, { materialId: material.id }, f.db)).every(row => row.reportDocument === null));
-    assert.equal((await loadMovementReportDocuments(reader, movementIds, f.db)).size, 0);
-    assert.equal((await loadOrganizationPayments(reader, "EXPENSE", f.db)).rows.find(row => row.id === expense.id)?.reportDocument, null);
-    await f.db.financeDocument.update({ where: { id: docs[0].id }, data: { state: "READY", readyAt: new Date() } });
+    await assert.rejects(f.db.financeDocument.update({ where: { id: docs[0].id }, data: { state: "PENDING", readyAt: null } }),
+      /cannot return to draft/);
+    await f.rollback(async tx => {
+      await tx.payment.update({ where: { id: expense.id }, data: { deletedAt: new Date(), deletedById: journalAdmin.id } });
+      assert.ok((await listMovements(reader, { materialId: material.id }, tx)).every(row => row.reportDocument === null));
+      assert.equal((await loadMovementReportDocuments(reader, movementIds, tx)).size, 0);
+      assert.ok(!(await loadOrganizationPayments(reader, "EXPENSE", tx)).rows.some(row => row.id === expense.id));
+    });
     const keptVersions = await f.versions(docs[0].key);
     await f.rollback(async tx => {
       await rejectedSql(tx, async () => {
