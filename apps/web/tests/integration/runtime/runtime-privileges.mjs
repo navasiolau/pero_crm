@@ -12,8 +12,11 @@ export function proveRuntimePrivileges(target) {
   const owner = (sql) => docker([...base, '-U', 'ci_runner', '-c', sql]);
   const facts = JSON.parse(owner(`SELECT json_build_object('db',current_database(),'role',current_user,
     'primary',NOT pg_is_in_recovery(),'claimed',EXISTS(SELECT 1 FROM pg_roles WHERE rolname='${login}'),
+    'prismaTable', (SELECT relkind FROM pg_class WHERE oid = 'public._prisma_migrations'::regclass),
+    'sequenceProbe', to_regclass('public.pero_ci_sequence_probe'),
     'group','pero_crm_runtime_' || left(md5(current_database()),16))`));
   requireCi(facts.db === 'pero_ci' && facts.role === 'ci_runner' && facts.primary && !facts.claimed &&
+    facts.prismaTable === 'r' && facts.sequenceProbe === null &&
     /^pero_crm_runtime_[0-9a-f]{16}$/.test(facts.group), 'runtime-role-target');
   owner(`BEGIN;
     CREATE TABLE public.pero_ci_cascade_probe (id text REFERENCES public."FinanceDocument"(id) ON DELETE CASCADE);
@@ -29,10 +32,18 @@ export function proveRuntimePrivileges(target) {
   owner('SELECT public.pero_refresh_runtime_grants()');
   owner(`CREATE ROLE "${login}" LOGIN NOSUPERUSER NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '${synthetic}';
     GRANT "${facts.group}" TO "${login}" WITH INHERIT TRUE, SET FALSE, ADMIN FALSE;`);
+  const restricted = (sql) => docker(['exec', '-e', `PGPASSWORD=${synthetic}`, target.postgresId, 'psql', '-X', '-v', 'ON_ERROR_STOP=1',
+    '-h', '127.0.0.1', '-U', login, '-d', 'pero_ci', '-At', '-c', sql]);
   try {
+    owner('CREATE SEQUENCE public.pero_ci_sequence_probe');
+    const violations = () => JSON.parse(restricted('SELECT to_json(public.pero_runtime_role_violations())'));
+    requireCi(JSON.stringify(violations()) === '[]', 'runtime-role-mixed-catalog');
+    owner(`GRANT UPDATE ON SEQUENCE public.pero_ci_sequence_probe TO "${login}"`);
+    requireCi(JSON.stringify(violations()) === '["sequence_mutation"]', 'runtime-role-detects-sequence-update');
+    owner(`REVOKE UPDATE ON SEQUENCE public.pero_ci_sequence_probe FROM "${login}"`);
+    requireCi(JSON.stringify(violations()) === '[]', 'runtime-role-sequence-restored');
     owner("CREATE FUNCTION public.pero_ci_no_access() RETURNS integer LANGUAGE sql SECURITY DEFINER AS 'SELECT 7'");
-    const result = docker(['exec', '-e', `PGPASSWORD=${synthetic}`, target.postgresId, 'psql', '-X', '-v', 'ON_ERROR_STOP=1',
-      '-h', '127.0.0.1', '-U', login, '-d', 'pero_ci', '-At', '-c', `
+    const result = restricted(`
       BEGIN;
       DO $test$
       DECLARE command text;
@@ -79,11 +90,12 @@ export function proveRuntimePrivileges(target) {
       $test$;
       ROLLBACK;
       SELECT 'crm runtime restrictions ok';
-    `]);
+    `);
     requireCi(result.endsWith('crm runtime restrictions ok'), 'runtime-role-positive-negative');
     requireCi(owner('SELECT count(*) FROM public."OrgSetting" WHERE "key" = \'ci-rights\'') === '0', 'runtime-role-rolled-back');
     console.log(JSON.stringify({ ciRuntime: 'separate-runtime-role', nativePostgres: true, dataRolledBack: true }));
   } finally {
+    owner("DROP SEQUENCE IF EXISTS public.pero_ci_sequence_probe");
     owner("DROP FUNCTION IF EXISTS public.pero_ci_no_access()");
     owner(`DROP ROLE "${login}"`);
   }
