@@ -29,7 +29,7 @@ END $$;
 CREATE TRIGGER "Task_journal_revision" BEFORE UPDATE ON "Task" FOR EACH ROW EXECUTE FUNCTION "increment_work_task_journal_revision"();
 CREATE TRIGGER "Work_journal_revision" BEFORE UPDATE ON "Work" FOR EACH ROW EXECUTE FUNCTION "increment_work_task_journal_revision"();
 
-CREATE FUNCTION "increment_task_dependency_journal_revision"() RETURNS trigger LANGUAGE plpgsql AS $
+CREATE FUNCTION "increment_task_dependency_journal_revision"() RETURNS trigger LANGUAGE plpgsql AS $dependency$
 BEGIN
   IF TG_OP = 'INSERT' THEN
     UPDATE "Task" SET "journalDependencyRevision" = "journalDependencyRevision" + 1 WHERE "id" IN (NEW."taskId", NEW."dependsOnId");
@@ -37,6 +37,6 @@ BEGIN
     UPDATE "Task" SET "journalDependencyRevision" = "journalDependencyRevision" + 1 WHERE "id" IN (OLD."taskId", OLD."dependsOnId");
   END IF;
   RETURN NULL;
-END $;
+END $dependency$;
 CREATE TRIGGER "TaskDependency_journal_revision" AFTER INSERT OR DELETE ON "TaskDependency"
   FOR EACH ROW EXECUTE FUNCTION "increment_task_dependency_journal_revision"();
