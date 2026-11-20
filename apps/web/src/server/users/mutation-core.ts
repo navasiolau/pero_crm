@@ -50,7 +50,7 @@ export async function createUserInTransaction(tx: Prisma.TransactionClient, acto
 
 export async function updateUserInTransaction(tx: Prisma.TransactionClient, actor: DomainActor, userId: string, input: UserSettingsInput, options?: { reversal: true }) {
   requireActorRoles(actor, ADMIN_ROLES);
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended('crm-account-admin-change', 0))`;
+  await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtextextended('crm-account-admin-change', 0))`;
   await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
   const before = await tx.user.findUnique({ where: { id: userId } });
   if (!before) return { ok: false as const, error: "Сотрудник не найден" };

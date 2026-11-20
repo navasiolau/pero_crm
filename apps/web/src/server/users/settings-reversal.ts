@@ -20,7 +20,7 @@ export const userSettingsReversal = defineJournalReversal({
   kind: "account.settings", version: 1, schema: userSettingsChange,
   async preview(ctx, data) { await load(ctx.tx, ctx.entityId, data); return null; },
   async apply(ctx, data) {
-    await ctx.tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended('crm-account-admin-change', 0))`;
+    await ctx.tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtextextended('crm-account-admin-change', 0))`;
     await ctx.tx.$queryRaw`SELECT id FROM "User" WHERE id = ${ctx.entityId} FOR UPDATE`;
     await load(ctx.tx, ctx.entityId, data);
     const desired = data.before;

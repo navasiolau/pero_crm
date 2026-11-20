@@ -46,7 +46,7 @@ export async function confirmTelegramLinkInTransaction(tx: Prisma.TransactionCli
   const digest = challengeDigest(input.code);
   const reference = await tx.telegramLink.findUnique({ where: { linkCode: digest }, select: { userId: true } });
   if (!reference) return rejected("Код не найден или истёк — запросите новый в профиле CRM");
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`telegram-chat:${input.chatId}`}, 0))`;
+  await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtextextended(${`telegram-chat:${input.chatId}`}, 0))`;
   await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${reference.userId} FOR UPDATE`;
   const link = await tx.telegramLink.findUnique({ where: { linkCode: digest }, include: { user: { select: userSelection } } });
   if (!link || link.userId !== reference.userId || (link.linkedAt && !link.revokedAt) ||
