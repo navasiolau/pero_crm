@@ -1693,6 +1693,22 @@ model TelegramLinkChallenge {
   @@index([linkId])
 }
 
+model TelegramFinanceBinding {
+  id             String   @id
+  launchHash     String   @unique
+  chatId         String
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+  attempts       Int      @default(0)
+  userId         String?
+  sessionVersion Int?
+  linkId         String?
+  linkGeneration Int?
+  consumedAt     DateTime?
+
+  @@index([chatId, createdAt])
+}
+
 // Личный план: owner всегда текущий session actor.
 enum CalendarEntryState {
   PLANNED

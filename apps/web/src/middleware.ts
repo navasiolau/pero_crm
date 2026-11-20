@@ -32,6 +32,6 @@ export const config = {
   // Next 15.5 Node middleware асинхронно восстанавливает клонированное POST body;
   // исключение точного endpoint предотвращает pre-handler disturbed-stream race.
   matcher: [
-    "/((?!login|telegram/finance$|api/telegram/finance/session$|api/auth|api/health$|api/kp(?:/|$)|api/files/upload$|api/finance/documents/upload$|api/logistics/documents/upload$|api/v1|manifest\\.webmanifest|sw\\.js|swe-worker|icon\\.svg|apple-icon\\.png|icons|_next/static|_next/image|favicon\\.ico).*)",
+    "/((?!login|telegram/finance$|api/telegram/finance/(?:session|binding)$|api/auth|api/health$|api/kp(?:/|$)|api/files/upload$|api/finance/documents/upload$|api/logistics/documents/upload$|api/v1|manifest\\.webmanifest|sw\\.js|swe-worker|icon\\.svg|apple-icon\\.png|icons|_next/static|_next/image|favicon\\.ico).*)",
   ],
 };

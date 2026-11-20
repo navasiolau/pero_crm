@@ -196,7 +196,13 @@ export async function handleUpdate(update: TgUpdate): Promise<void> {
   }
 
   const session = await getSession(String(chatId));
-  if (!session) return; // непривязанные — молча
+  if (!session) {
+    const url = config.financeWorkspaceUrl;
+    if (url && ["/start", "/финансы", "/finance"].includes(cmd)) {
+      await reply(chatId, "Подключите свою учётную запись CRM, чтобы открыть финансы.", [[{ text: "Подключить финансы", web_app: { url } }]]);
+    }
+    return;
+  }
 
   if (!session.botAllowed) {
     const last = noticeAt.get(String(chatId)) ?? 0;
