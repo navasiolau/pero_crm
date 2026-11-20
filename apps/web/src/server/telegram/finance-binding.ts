@@ -29,7 +29,7 @@ export async function verifyTelegramFinanceBindingAccount(id: string | undefined
   const reservation = await prisma.$transaction(async tx => {
     const pending = await tx.telegramFinanceBinding.findUnique({ where: { id } });
     if (!pending || pending.consumedAt || pending.expiresAt <= new Date()) return null;
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"telegram-binding-rate:" + pending.chatId}, 0))`;
+    await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtextextended(${"telegram-binding-rate:" + pending.chatId}, 0))`;
     const attempts = await tx.telegramFinanceBinding.aggregate({ where: { chatId: pending.chatId, createdAt: { gt: new Date(Date.now() - 900_000) } },
       _sum: { attempts: true } });
     if ((attempts._sum.attempts ?? 0) >= 10) return "limited";
