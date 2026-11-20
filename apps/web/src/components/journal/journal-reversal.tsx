@@ -54,6 +54,6 @@ export function JournalReversal({ entryId, scope, onReversed }: { entryId: strin
         Закрыть подтверждение
       </Button> : null}
     </div>
-    {message ? <p role="alert">{message.text} {message.href ? <a href={message.href} className="underline">Открыть запись</a> : null}</p> : null}
+    {message ? <p role="alert">{message.text} {message.href ? <a href={message.href} className="underline">{message.href.startsWith("/changelog?") ? "Открыть историю в Журнале" : "Открыть связанную запись"}</a> : null}</p> : null}
   </div>;
 }

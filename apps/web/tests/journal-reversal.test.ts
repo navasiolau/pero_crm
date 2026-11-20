@@ -165,6 +165,15 @@ test("service-mode reversal restores the split without overwriting an independen
   assert.equal(result.eventIds?.length, 1);
 });
 
+test("a conflict without an identified newer event links to the affected product history", async () => {
+  const f = fixture();
+  const first = await f.rename("А", "Б");
+  await f.tx.product.update({ where: { id: f.product.id }, data: { title: "Внешняя правка" } });
+  const conflict = { message: "После этого действия поле изменилось", href: "/changelog?q=product" };
+  await assert.rejects(() => previewJournalReversalInTransaction(f.tx, actor.id, f.request(first)), conflict);
+  await assert.rejects(() => f.transaction(tx => reverseJournalActionInTransaction(tx, actor.id, f.request(first))), conflict);
+});
+
 test("child resolves its root, scoped and live role checks precede changes, audit faults roll back", async () => {
   const f = fixture();
   const root = await f.rename("А", "Б");
@@ -175,12 +184,12 @@ test("child resolves its root, scoped and live role checks precede changes, audi
   const request = f.request("child");
   assert.equal((await previewJournalReversalInTransaction(f.tx, actor.id, request)).entryId, root);
   await assert.rejects(() => previewJournalReversalInTransaction(f.tx, actor.id,
-    { ...request, scope: { kind: "product", id: "other-product" } }), /не найдена/);
+    { ...request, scope: { kind: "product", id: "other-product" } }), { message: "Запись журнала не найдена", href: undefined });
   f.changeRole("ACCOUNTANT");
-  await assert.rejects(() => f.transaction(tx => reverseJournalActionInTransaction(tx, actor.id, request)), /Недостаточно прав/);
+  await assert.rejects(() => f.transaction(tx => reverseJournalActionInTransaction(tx, actor.id, request)), { message: "Недостаточно прав", href: undefined });
   f.changeRole("ADMIN");
   f.failAudit();
-  await assert.rejects(() => f.transaction(tx => reverseJournalActionInTransaction(tx, actor.id, request)), /audit fault/);
+  await assert.rejects(() => f.transaction(tx => reverseJournalActionInTransaction(tx, actor.id, request)), (error: unknown) => error instanceof Error && error.message === "audit fault" && !("href" in error));
   assert.equal(f.product.title, "Б");
   assert.equal(f.product.titleRevision, 1);
   assert.equal(f.rows.size, 2);
