@@ -1041,7 +1041,7 @@ class DockerRuntime:
                 "--env", f"DATABASE_URL={self.non_secret_runtime_url(config, database)}",
                 "--env", f"PERO_DB_MIGRATOR_ROLE={role}", "--env", f"PERO_DB_MIGRATION_DATABASE={database}",
                 "--env", f"PERO_MIGRATION_EXPECTED_DB_IP={address}",
-                reference, "apps/web/runtime-migrate.cjs"], "migration-container-create", timeout=20).strip()
+                reference, "apps/web/runtime-migrate.mjs"], "migration-container-create", timeout=20).strip()
             require(bool(CONTAINER_RE.fullmatch(container_id)), "migration-container-identity")
             self.command(DOCKER + ["start", "--attach", container_id], "migration-deploy", timeout=80)
             exit_code = self.command(DOCKER + ["inspect", "--format", "{{.State.ExitCode}}", "--type", "container", container_id],

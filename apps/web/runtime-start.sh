@@ -8,12 +8,12 @@ if [ "${PERO_DB_ENFORCE_RUNTIME:-0}" = 1 ]; then
   fi
   if [ "${PERO_DB_MIGRATE_ON_START:-0}" = 1 ]; then
     if [ "${PERO_DB_SKIP_MIGRATION:-0}" != 1 ]; then
-      node apps/web/runtime-migrate.cjs
+      node apps/web/runtime-migrate.mjs
     fi
     unset PERO_DB_MIGRATOR_ROLE PERO_DB_MIGRATION_DATABASE PERO_MIGRATION_EXPECTED_DB_IP PERO_DB_SKIP_MIGRATION
     export HOME=/home/node
     exec setpriv --no-new-privs --bounding-set=-all --inh-caps=-all --ambient-caps=-all \
-      --reuid=1000 --regid=1000 --clear-groups node apps/web/runtime-web.cjs
+      --reuid=1000 --regid=1000 --clear-groups node apps/web/runtime-web.mjs
   fi
 else
   prisma migrate deploy --schema apps/web/prisma/schema.prisma
