@@ -422,7 +422,20 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     const legacyPage = await f.request("/finance/documents", reader); assert.equal(legacyPage.status, 307);
     assert.equal(new URL(legacyPage.headers.get("location")!, f.target.baseUrl).pathname, "/finance/expenses");
     for (const path of ["/finance/expenses", "/warehouse/movements"]) {
-      const response = await f.request(path, reader); assert.equal(response.status, 200);
+      let response = await f.request(path, reader);
+      if (path === "/finance/expenses") {
+        assert.equal(response.status, 307);
+        const canonical = new URL(response.headers.get("location")!, f.target.baseUrl);
+        assert.equal(canonical.origin, f.target.baseUrl);
+        assert.equal(canonical.pathname, path);
+        assert.equal(canonical.searchParams.get("view"), "table");
+        const landing = await f.request(canonical.pathname + canonical.search, reader);
+        assert.equal(landing.status, 200);
+        await landing.arrayBuffer();
+        canonical.searchParams.set("id", expense.id);
+        response = await f.request(canonical.pathname + canonical.search, reader);
+      }
+      assert.equal(response.status, 200);
       const html = await response.text(); assert.ok(html.includes(docs[0].name)); assert.ok(html.includes("/api/finance/documents/" + docs[0].id));
     }
     const hiddenMovement = await f.request("/warehouse/movements", manager); assert.equal(hiddenMovement.status, 200);
