@@ -12,6 +12,8 @@ import { createPostgresFixture, rejectedSql, type PostgresRows } from "./postgre
 import { summarizeCalendarEntries } from "../../src/lib/calendar-summary";
 import { verifyCounterpartyNative } from "../helpers/counterparty-native";
 import { productDraftAccessRelations } from "../../src/server/access/product-draft-context";
+import { fixedProposalRate } from "../../src/server/kp/pricing-contract";
+import { createProposalSaveHooks } from "../../src/server/kp/save-hooks";
 import { verifyProposalCompositionNative } from "../helpers/kp-proposal-native";
 import { verifyProductNumberingNative } from "../helpers/product-numbering-native";
 import { requestProposalPdfInTransaction, recordPendingPdfArtifactInTransaction, publishSourcePdfInTransaction,
@@ -924,6 +926,41 @@ test("kp181/native-composition-stable-ids-active-number-swap-client-mirror-repla
   const actor = actorOf(await rows.user("kp181-domain-manager", ["MANAGER"]));
   const result = await run(actor, tx, () => verifyProposalCompositionNative(tx, actor, proposals, products));
   assert.equal(result.sameIdRestore, true); assert.equal(result.rollbackNoNumberSpent, true); assert.equal(result.atomicFailureRollback, true);
+}));
+
+test("kp254/native-first-save-creates-immutable-checkpoint-without-a-pdf", async () => fixture.rollback(async (tx, rows) => {
+  const actor = actorOf(await rows.user("kp254-checkpoint-admin", ["ADMIN"]));
+  const temporary = await tx.client.create({ data: { name: "Временный", phone: "KP254_SYNTHETIC" } });
+  const customer = await tx.client.create({ data: { name: "Клиент КП254", phone: "+375000000254" } });
+  const rate = fixedProposalRate({ currency: "BYN", value: "1", date: "2026-11-20", source: "MANUAL" }, "BYN");
+  const hooks = { ...createProposalSaveHooks(rate), environment: { PERO_KP_TEMP_CLIENT_ID: temporary.id } };
+  const created = (await proposals.createProposalInTransaction(tx, actor, {
+    operationId: randomUUID(), clientId: customer.id, state: {
+      currency: "BYN", order: { project: "Синтетическое КП254", address: "Адрес КП254" },
+      items: [{ name: "Первая редакция", qty: 1, price: 100 }],
+    },
+  }, hooks)).result;
+  const proposalId = created.proposalId;
+  assert.equal(await tx.proposalVersion.count({ where: { proposalId } }), 0);
+  const saved = await proposals.saveProposalInTransaction(tx, actor, {
+    proposalId, expectedRevision: created.revision, operationId: randomUUID(),
+    state: { ...created.state, items: created.state.items.map(item => ({ ...item, name: "Вторая редакция", price: 150 })) },
+  }, hooks);
+  assert.equal(saved.result.revision, created.revision + 1);
+  assert.ok(saved.undo);
+  const checkpoint = await tx.proposalVersion.findUniqueOrThrow({ where: { id: saved.undo.checkpointId } });
+  assert.equal(checkpoint.trigger, "EDIT");
+  assert.equal(checkpoint.pdfArtifactId, null);
+  assert.equal(checkpoint.revision, created.revision);
+  assert.deepEqual(checkpoint.state, created.state);
+  assert.equal(await tx.proposalVersion.count({ where: { proposalId } }), 1);
+
+  for (const trigger of ["PDF", "CONTRACT"] as const) {
+    await rejectedSql(tx, () => tx.$executeRaw`INSERT INTO "ProposalVersion"
+      (id,"proposalId",revision,trigger,state,"pricingSnapshot","renderSnapshot","templateVersion","createdAt")
+      SELECT ${randomUUID()},"proposalId",revision,${trigger}::"ProposalVersionTrigger",state,"pricingSnapshot","renderSnapshot","templateVersion",NOW()
+      FROM "ProposalVersion" WHERE id=${checkpoint.id}`, /23514|ProposalVersion_pdf_check/);
+  }
 }));
 
 test("kp181/shared-project-quote-allocation-real-advisory-waiter-and-repeated-request", async () => {
