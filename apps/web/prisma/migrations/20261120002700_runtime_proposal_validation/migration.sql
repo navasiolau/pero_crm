@@ -43,6 +43,7 @@ BEGIN
   EXECUTE format('GRANT EXECUTE ON FUNCTION public.kp_json_object_array(jsonb),
     public.kp_valid_state(jsonb), public.kp_valid_storage_binding(jsonb),
     public.kp_valid_object_key(text) TO %I', runtime_role);
+  EXECUTE format('GRANT EXECUTE ON FUNCTION public.pero_runtime_role_violations() TO %I', runtime_role);
 END
 $grants$;
 

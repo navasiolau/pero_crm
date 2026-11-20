@@ -29,6 +29,7 @@ export function proveRuntimePrivileges(target) {
     END
     $check$;
     ROLLBACK;`);
+  owner(`REVOKE EXECUTE ON FUNCTION public.kp_valid_state(jsonb), public.pero_runtime_role_violations() FROM "${facts.group}"`);
   owner('SELECT public.pero_refresh_runtime_grants()');
   owner(`CREATE ROLE "${login}" LOGIN NOSUPERUSER NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '${synthetic}';
     GRANT "${facts.group}" TO "${login}" WITH INHERIT TRUE, SET FALSE, ADMIN FALSE;`);
