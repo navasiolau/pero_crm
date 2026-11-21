@@ -40,6 +40,7 @@ createRoot(document.getElementById("root")).render(<Fixture />);
 `;
 
 const boundaries = {
+  "next/link": 'export default function Link({ children, replace, onNavigate, ...props }) { return <a {...props}>{children}</a>; }',
   "next/navigation": 'export const useRouter = () => ({ refresh() {} });',
   "@/server/payroll/actions": 'export const addPayout = () => { throw Error("Запись запрещена в тесте"); };',
   "@/server/payroll/cash-actions": `
@@ -80,6 +81,8 @@ test("страница аванса адаптируется к ширине к�
   const browser = await launchCardBrowser();
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const pageErrors = [];
+    page.on("pageerror", error => pageErrors.push(error.message));
     const url = "http://advance-fixture.test";
     await page.route(url + "/**", async route => {
       const pathname = new URL(route.request().url()).pathname;
@@ -93,7 +96,10 @@ test("страница аванса адаптируется к ширине к�
     const balances = main.getByRole("region", { name: "Остатки активных касс" });
     const employee = form.getByText("Сотрудник *", { exact: true });
     const cash = form.getByText("Касса *", { exact: true });
-    await expect(balances.locator("[data-slot=card]")).toHaveCount(2);
+    await expect(balances.locator("[data-slot=card]")).toHaveCount(2).catch(error => {
+      assert.deepEqual(pageErrors, []);
+      throw error;
+    });
     await expect(balances.getByText(/100\s*\$/)).toBeVisible();
     await expect(balances.getByText(/700.*BYN/)).toBeVisible();
     await expect(balances.getByText("Неактивная касса")).toHaveCount(0);
@@ -142,6 +148,7 @@ test("страница аванса адаптируется к ширине к�
     const dialogCash = await dialog.getByText("Касса *", { exact: true }).boundingBox();
     assert.equal(dialogEmployee.x, dialogCash.x);
     assert.ok(dialogCash.y > dialogEmployee.y);
+    assert.deepEqual(pageErrors, []);
   } finally {
     await browser.close();
   }
