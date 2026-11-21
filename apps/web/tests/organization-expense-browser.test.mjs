@@ -278,15 +278,17 @@ test("реестр расходов в Chromium сохраняет фильтр�
     const filterPage = await browser.newPage();
     try {
       const counters = new URLSearchParams({
-        purpose: JSON.stringify(["material", "delivery"]), cash: "a", article: "materials",
+        cash: "a", article: "materials",
         dateFrom: "2026-11-01", dateTo: "2026-11-30", amountFrom: "2", amountTo: "20",
       });
       const measurements = [];
       const activeToolbar = filterPage.getByRole("group", { name: "Фильтры расходов", exact: true });
       for (const width of [1920, 390, 360, 320]) {
+        const purposeCount = width === 320 ? 12 : 2;
+        counters.set("purpose", JSON.stringify(Array.from({ length: purposeCount }, (_, index) => `project-${index + 1}`)));
         await filterPage.setViewportSize({ width, height: 844 });
         await filterPage.goto(`${url}?${counters}`);
-        const counts = [["Назначение", "2"], ["Касса", "1"]];
+        const counts = [["Назначение", String(purposeCount)], ["Касса", "1"]];
         if (width < 400) counts.push(["Дата", "2"], ["Статья", "1"], ["Сумма", "2"]);
         for (const [caption, count] of counts) {
           const button = activeToolbar.getByRole("button", { name: caption, exact: true });
