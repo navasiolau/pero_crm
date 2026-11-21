@@ -159,7 +159,9 @@ test("реестр расходов в Chromium сохраняет фильтр�
 
     const toolbar = page.getByRole("group", { name: "Фильтры расходов", exact: true });
     const primary = ["Дата", "Назначение", "Касса", "Статья", "Сумма"];
-    for (const width of [1440, 768, 390, 360, 320]) {
+    // В оболочке CRM боковое меню занимает 16 rem при ширине от 768 px.
+    const sidebar = await page.addStyleTag({ content: "@media (min-width: 768px) { main { margin-left: 16rem; } }" });
+    for (const width of [1920, 1366, 1024, 840, 768, 390, 360, 320]) {
       await page.setViewportSize({ width, height: 844 });
       const controls = [toolbar.getByRole("textbox", { name: "Поиск по расходам" }),
         ...primary.map(name => toolbar.getByRole("button", { name, exact: true }))];
@@ -169,7 +171,21 @@ test("реестр расходов в Chromium сохраняет фильтр�
         assert.ok(box.x >= boxes[index].x + boxes[index].width - 1);
         assert.ok(Math.abs(box.y + box.height / 2 - boxes[0].y - boxes[0].height / 2) < 2);
       });
+      for (const label of primary) {
+        const caption = label === "Назначение" && width < 360 ? "Назн." : label;
+        const control = toolbar.getByRole("button", { name: label, exact: true });
+        const fits = await control.getByText(caption, { exact: true }).last().evaluate(text => {
+          const button = text.closest("button");
+          const range = document.createRange();
+          range.selectNodeContents(text);
+          const rect = range.getBoundingClientRect(), outer = button.getBoundingClientRect();
+          const arrow = button.querySelector("svg")?.getBoundingClientRect();
+          return rect.width > 0 && rect.left >= outer.left && rect.right <= (arrow?.width ? arrow.left : outer.right) + 1;
+        });
+        assert.ok(fits, `Подпись «${caption}» должна помещаться в кнопку при ширине ${width}`);
+      }
     }
+    await sidebar.evaluate(node => node.remove());
     await page.setViewportSize({ width: 1440, height: 900 });
     await toolbar.getByRole("button", { name: "Дата", exact: true }).click();
     const dates = page.getByRole("dialog", { name: "Дата", exact: true });
