@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import type { PageDestination } from "@/lib/page-navigation";
 import { cn } from "@/lib/utils";
 import { PageBackLink } from "./page-back-link";
-import { usePageBack } from "./page-navigation-provider";
+import { usePageBack } from "./page-navigation-context";
 
 type PageHeaderProps = {
   title: ReactNode;

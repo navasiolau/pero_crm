@@ -1,19 +1,12 @@
 "use client";
 
 import { usePathname, useSearchParams } from "next/navigation";
-import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { isCrmPage, resolvePageBack, visitPage, type PageDestination, type PageVisit } from "@/lib/page-navigation";
+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { isCrmPage, visitPage, type PageVisit } from "@/lib/page-navigation";
+import { PageNavigationContext, type ReturnEvent } from "./page-navigation-context";
 
 type NativeEntry = { key: string; index: number; url: string | null };
 type TabWindow = Window & { navigation?: { currentEntry: NativeEntry | null; entries(): NativeEntry[] } };
-type ReturnEvent = { preventDefault(): void };
-type NavigationState = {
-  pathname: string;
-  home: string;
-  previous: string | null;
-  goBack: (href: string, event: ReturnEvent) => void;
-};
-const Navigation = createContext<NavigationState | null>(null);
 
 export function PageNavigationProvider({ scope, home, children }: { scope: string; home: string; children: ReactNode }) {
   const pathname = usePathname();
@@ -60,11 +53,5 @@ export function PageNavigationProvider({ scope, home, children }: { scope: strin
     }
   }, []);
 
-  return <Navigation.Provider value={{ pathname, home, previous, goBack }}>{children}</Navigation.Provider>;
-}
-
-export function usePageBack(explicit?: PageDestination) {
-  const navigation = useContext(Navigation);
-  const destination = navigation ? resolvePageBack(navigation.pathname, navigation.home, navigation.previous, explicit) : explicit;
-  return { destination, goBack: navigation?.goBack };
+  return <PageNavigationContext.Provider value={{ pathname, home, previous, goBack }}>{children}</PageNavigationContext.Provider>;
 }
