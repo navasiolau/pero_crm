@@ -129,6 +129,14 @@ async function runBoardPage(browser,origin,scope,variant,expect,checkDrag){
    assert.deepEqual(await page.evaluate(()=>window.__qa.pushes),[]);assert.deepEqual(await page.evaluate(()=>window.__qa.unexpected),[]);
    await expect(page.getByRole('dialog')).toHaveCount(0);
   }
+  if(scope==='project'&&variant==='baseline'){
+   const list='/projects?view=table&q=qa160&sort=number&dir=asc&page=3&pageSize=50';
+   const project='/projects/qa160-project';
+   const nested=project+'?tab=products&'+new URLSearchParams({returnTo:list});
+   await page.evaluate(href=>history.replaceState(null,'',href),project+'?'+new URLSearchParams({returnTo:list}));
+   await assertClickNavigation(page,body,nested,expect,'body');
+   assert.equal(new URL(page.url()).pathname+new URL(page.url()).search,nested,'SAME_PROJECT_HISTORY_AND_ARROW');
+  }
   assert.deepEqual(errors,[],'BROWSER_RENDER_ERROR');assert.deepEqual(unexpected,[],'UNEXPECTED_NETWORK');
   return{scope,variant,ready:true,trustedCover:true,trustedBody:true,oneCorrectNavigation:true,dragPreview:checkDrag?'actual-pointer-disabled-no-navigation':'NOT_RUN'};
  }finally{await page.close();}
