@@ -436,7 +436,20 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
         response = await f.request(canonical.pathname + canonical.search, reader);
       }
       assert.equal(response.status, 200);
-      const html = await response.text(); assert.ok(html.includes(docs[0].name)); assert.ok(html.includes("/api/finance/documents/" + docs[0].id));
+      const html = await response.text();
+      const document = docs[0], url = "/api/finance/documents/" + document.id;
+      assert.ok(html.includes(document.name));
+      if (path === "/finance/expenses") {
+        assert.ok(html.includes(`aria-description="${expense.id}"`));
+        assert.ok(html.includes('aria-label="Документы, 1"'));
+        assert.ok(html.includes(document.id));
+        const download = await f.request(url, reader);
+        assert.equal(download.status, 200);
+        assert.equal(download.headers.get("content-type"), document.mime);
+        assert.deepEqual(Buffer.from(await download.arrayBuffer()), Buffer.from(document.bytes));
+      } else {
+        assert.ok(html.includes(url));
+      }
     }
     const hiddenMovement = await f.request("/warehouse/movements", manager); assert.equal(hiddenMovement.status, 200);
     const hiddenHtml = await hiddenMovement.text(); assert.ok(!hiddenHtml.includes(docs[0].id)); assert.ok(!hiddenHtml.includes(docs[0].name));
