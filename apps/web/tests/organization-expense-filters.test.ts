@@ -21,7 +21,7 @@ test("условия отдельных полей соединяются чер
     cash: '["a","b"]', article: '["@logistics","other"]', purpose: '["@general","@stock","p1"]',
     dateFrom: "2026-11-20", dateTo: "2026-11-20", document: "Рейс_10",
     bynFrom: "0.01", material: '["m1","m2"]', stockUnit: "unit",
-    stockQtyFrom: "2.5", stockUnitPriceTo: "17", stockValueBynFrom: "30", movement: "movement-id",
+    stockQtyFrom: "2.5", stockUnitPriceTo: "17,123456789012", stockValueBynFrom: "30", movement: "movement-id",
   });
   const { where, orderBy } = organizationExpenseQuery(params.toString());
   const [base, scalar, ...selectors] = where.AND;
@@ -41,15 +41,50 @@ test("условия отдельных полей соединяются чер
   assert.equal(selectors[3].OR?.length, 3);
   assert.match(JSON.stringify(selectors[3]), /READY/);
   const stockLine = {
-    movementId: { contains: "movement-id", mode: "insensitive" }, unitPrice: { gte: undefined, lte: "17" },
+    movementId: { contains: "movement-id", mode: "insensitive" }, unitPrice: { gte: undefined, lte: "17.123456789012" },
     movement: { materialId: { in: ["m1", "m2"] }, material: { unitId: { in: ["unit"] } },
       quantity: { gte: "2.5", lte: undefined }, totalByn: { gte: "30", lte: undefined } },
   };
+  const stockLineWhere = { AND: [stockLine, { movement: { deletionId: null } }] };
   assert.deepEqual(selectors[4], { OR: [
-    { stockPurchase: stockLine },
-    { expenseReceipts: { some: { cancelledAt: null, lines: { some: stockLine } } } },
+    { stockPurchase: stockLineWhere },
+    { stockPurchase: { is: null }, expenseReceipts: { some: { cancelledAt: null, lines: { some: stockLineWhere } } } },
   ] });
   assert.deepEqual(orderBy, [{ paidAt: "desc" }, { id: "desc" }]);
+});
+
+function searchPredicates(q: string) {
+  return organizationExpenseQuery(new URLSearchParams({ q }).toString()).where.AND.at(-1)?.OR ?? [];
+}
+
+test("общий поиск распознаёт обе записи календарной даты и границы московских суток", () => {
+  const localized = searchPredicates("20.11.2026");
+  const iso = searchPredicates("2026-11-20");
+  const day = { gte: new Date("2026-11-19T21:00:00.000Z"), lt: new Date("2026-11-20T21:00:00.000Z") };
+  for (const predicates of [localized, iso]) {
+    assert(predicates.some(term => "paidAt" in term));
+    assert.deepEqual(predicates.filter(term => "paidAt" in term || "rateDate" in term), [{ paidAt: day }, { rateDate: day }]);
+  }
+  const transition = { gte: new Date("2011-03-26T21:00:00.000Z"), lt: new Date("2011-03-27T20:00:00.000Z") };
+  assert.deepEqual(searchPredicates("27.03.2011").find(term => "paidAt" in term), { paidAt: transition });
+  assert(!searchPredicates("30.02.2026").some(term => "paidAt" in term || "rateDate" in term));
+});
+
+test("общий поиск различает деньги, курс и складское количество при суффиксе", () => {
+  for (const q of ["1 000,00 BYN", "1\u00a0000,00\u00a0byn", "1\u202f000,00 BYN"]) {
+    const predicates = searchPredicates(q);
+    assert(predicates.some(term => term.bynAmount === "1000"));
+    assert(predicates.some(term => term.currency === "BYN" && term.OR?.some(branch => branch.amount === "1000")));
+    assert(!predicates.some(term => "rate" in term || "amount" in term));
+  }
+  const currency = searchPredicates("1 000,00 $");
+  assert(currency.some(term => term.currency === "USD" && term.OR?.some(branch => branch.amount === "1000")));
+  assert(!currency.some(term => "bynAmount" in term || "rate" in term));
+  const precise = searchPredicates("1,234567890123 USD");
+  assert.match(JSON.stringify(precise.find(term => term.currency === "USD")), /"unitPrice":"1\.234567890123"/);
+  const quantity = searchPredicates("1\u202f234,567 м²");
+  assert.match(JSON.stringify(quantity), /"quantity":"1234\.567","material":\{"measurementUnit":\{"name":\{"equals":"м²"/);
+  assert(!quantity.some(term => "rate" in term || "amount" in term || "bynAmount" in term));
 });
 
 test("итог и количество независимы от размера, авторизация предшествует чтению", async () => {

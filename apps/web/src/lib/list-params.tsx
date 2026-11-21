@@ -67,7 +67,8 @@ export function useListParams() {
   const getQuery = useCallback(() => controller.getSnapshot().query, [controller]);
   const set = useCallback((updates: Record<string, string | null>) => controller.set(updates), [controller]);
   const reset = useCallback(() => controller.reset(), [controller]);
-  return { get, getQuery, set, reset, query: snapshot.query, pending: snapshot.pending || navigating, revision: snapshot.revision, searchRevision: snapshot.searchRevision, canReset: snapshot.query !== controller.defaultQuery() };
+  const resetFilters = useCallback((filters: Record<string, null>) => controller.reset(filters), [controller]);
+  return { get, getQuery, set, reset, resetFilters, query: snapshot.query, pending: snapshot.pending || navigating, revision: snapshot.revision, searchRevision: snapshot.searchRevision, canReset: snapshot.query !== controller.defaultQuery() };
 }
 
 // Таймер появляется только вследствие ввода, эффекты синхронизации не пишут URL.

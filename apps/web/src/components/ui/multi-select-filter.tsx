@@ -1,17 +1,27 @@
 "use client";
 
-import { memo, useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject, type KeyboardEvent } from "react";
+import { memo, useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject, type KeyboardEvent, type ReactNode } from "react";
 import { ChevronDown, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { useOptionsFilter } from "@/hooks/use-options-filter";
 import { cn } from "@/lib/utils";
 
 export interface MultiSelectFilterOption { value: string; label: string; }
-type Props = { label: string; options: MultiSelectFilterOption[]; value: readonly string[] | undefined; onChange: (value: string[] | undefined) => void; allLabel: string; searchPlaceholder?: string; className?: string; };
+type Props = {
+  label: string;
+  options: MultiSelectFilterOption[];
+  value: readonly string[] | undefined;
+  onChange: (value: string[] | undefined) => void;
+  allLabel: string;
+  searchPlaceholder?: string;
+  className?: string;
+  triggerContent?: ReactNode;
+  showPopoverTitle?: boolean;
+};
 
 const OptionRow = memo(function OptionRow({ option, prefix, checked, onToggle }: {
   option: MultiSelectFilterOption; prefix: string; checked: boolean; onToggle: (value: string, checked: boolean) => void;
@@ -113,7 +123,7 @@ function OptionsContent({ options, value, query, setQuery, searchInput, searchPl
 }
 
 // Неизвестные IDs сохраняются до явного действия пользователя.
-export function MultiSelectFilter({ label, options, value, onChange, allLabel, searchPlaceholder = "Поиск…", className }: Props) {
+export function MultiSelectFilter({ label, options, value, onChange, allLabel, searchPlaceholder = "Поиск…", className, triggerContent, showPopoverTitle }: Props) {
   const id = useId(), [open, setOpen] = useState(false), [query, setQuery] = useState("");
   const searchInput = useRef<HTMLInputElement>(null);
   const count = value?.length, first = value?.[0];
@@ -125,10 +135,20 @@ export function MultiSelectFilter({ label, options, value, onChange, allLabel, s
   }, [value, onChange]);
   const reset = useCallback(() => onChange(undefined), [onChange]);
   return <Popover open={open} onOpenChange={next => { setOpen(next); if (!next) setQuery(""); }}>
-    <PopoverTrigger render={<Button variant="outline" aria-label={label} className={cn("w-full justify-between font-normal", className)} />}>
-      <span className="truncate">{selectedLabel}</span><ChevronDown className="size-4 shrink-0 opacity-50" />
+    <PopoverTrigger render={<Button
+      variant="outline"
+      aria-label={label}
+      aria-description={triggerContent && count ? "Выбрано: " + count : undefined}
+      className={cn("w-full justify-between font-normal", className)}
+    />}>
+      {triggerContent ?? <><span className="truncate">{selectedLabel}</span><ChevronDown className="size-4 shrink-0 opacity-50" /></>}
     </PopoverTrigger>
-    <PopoverContent align="start" className="w-72 gap-2 p-2" initialFocus={searchInput}>
+    <PopoverContent
+      align="start"
+      className={cn("w-72 gap-2 p-2", showPopoverTitle && "max-h-[var(--available-height)] max-w-[calc(100vw-1rem)]")}
+      initialFocus={showPopoverTitle ? interaction => interaction === "touch" ? false : searchInput.current : searchInput}
+    >
+      {showPopoverTitle ? <PopoverTitle>{label}</PopoverTitle> : null}
       <OptionsContent options={options} value={value} query={query} setQuery={setQuery} searchInput={searchInput} searchPlaceholder={searchPlaceholder} label={label} prefix={id} onToggle={toggle} onReset={reset} />
     </PopoverContent>
   </Popover>;

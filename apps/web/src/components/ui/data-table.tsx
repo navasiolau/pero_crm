@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, Search } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import {
@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
   Table,
   TableBody,
@@ -22,12 +23,16 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
-export interface DataColumn<TRow> {
+interface DataColumnSort<TRow> {
   id: string;
   header: string;
+  sortValue?: (row: TRow) => string | number;
+}
+
+export interface DataColumn<TRow> extends DataColumnSort<TRow> {
   cell: (row: TRow) => ReactNode;
   sortable?: boolean;
-  sortValue?: (row: TRow) => string | number;
+  additionalSorts?: DataColumnSort<TRow>[];
   /** Строки для поиска; если не задано — используется sortValue */
   searchValue?: (row: TRow) => string;
   className?: string;
@@ -64,6 +69,8 @@ export function DataTable<TRow extends { id: string }>({
   defaultPageSize = 10,
   server,
   renderMobileCard,
+  tableSummary,
+  tableHeaderClassName,
 }: {
   columns: DataColumn<TRow>[];
   rows: TRow[];
@@ -79,12 +86,20 @@ export function DataTable<TRow extends { id: string }>({
   server?: DataTableServerState;
   /** Карточный вид до 768 px; данные, сортировка и пагинация общие. */
   renderMobileCard?: (row: TRow) => ReactNode;
+  /** Общий заголовок таблицы и карточек, включая счётчик записей. */
+  tableSummary?: ReactNode;
+  tableHeaderClassName?: string;
 }) {
   const [query, setQuery] = useState("");
   const [sortId, setSortId] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(defaultPageSize);
+  const sortOptions = useMemo(() => columns.flatMap(column => [
+    ...(column.sortable ? [column] : []),
+    ...(column.additionalSorts ?? []),
+  ]), [columns]);
+  const hasSummary = tableSummary !== undefined && tableSummary !== null;
 
   const filtered = useMemo(() => {
     // Сервер-режим: данные уже отфильтрованы и отсортированы на сервере
@@ -101,7 +116,7 @@ export function DataTable<TRow extends { id: string }>({
       );
     }
     if (sortId) {
-      const column = columns.find((item) => item.id === sortId);
+      const column = sortOptions.find((item) => item.id === sortId);
       if (column?.sortValue) {
         const getter = column.sortValue;
         result = [...result].sort((a, b) => {
@@ -116,7 +131,7 @@ export function DataTable<TRow extends { id: string }>({
       }
     }
     return result;
-  }, [rows, columns, query, sortId, sortDir, server]);
+  }, [rows, columns, query, sortOptions, sortId, sortDir, server]);
 
   const totalCount = server ? server.total : filtered.length;
   const activePageSize = server ? server.pageSize : pageSize;
@@ -130,8 +145,7 @@ export function DataTable<TRow extends { id: string }>({
 
   // Клик по заголовку: клиентский режим крутит локальную сортировку,
   // серверный — отдаёт событие наверх (в URL)
-  function toggleSort(column: DataColumn<TRow>) {
-    if (!column.sortable) return;
+  function toggleSort(column: DataColumnSort<TRow>) {
     if (server) {
       if (server.sort === column.id) {
         server.onSortChange(column.id, server.dir === "asc" ? "desc" : "asc");
@@ -153,6 +167,37 @@ export function DataTable<TRow extends { id: string }>({
   const activeSortId = server ? server.sort : sortId;
   const activeSortDir = server ? server.dir : sortDir;
 
+  function sortIcon(id: string) {
+    if (activeSortId !== id) return <ArrowUpDown className="size-3.5 opacity-40" aria-hidden="true" />;
+    return activeSortDir === "asc"
+      ? <ArrowUp className="size-3.5" aria-hidden="true" />
+      : <ArrowDown className="size-3.5" aria-hidden="true" />;
+  }
+
+  function renderHeading(column: DataColumn<TRow>) {
+    if (!column.sortable || (!column.sortValue && !server)) return column.header;
+    const className = cn("flex items-center gap-1 hover:text-foreground",
+      column.headerClassName?.includes("text-right") && "w-full justify-end");
+    if (!column.additionalSorts?.length) return (
+      <button type="button" className={className} onClick={() => toggleSort(column)}>
+        {column.header}{sortIcon(column.id)}
+      </button>
+    );
+    const choices = [column, ...column.additionalSorts].filter(option => server || option.sortValue);
+    const selected = choices.find(option => option.id === activeSortId);
+    return <DropdownMenu>
+      <DropdownMenuTrigger className={className}>
+        {column.header}
+        {selected ? sortIcon(selected.id) : <ChevronDown className="size-3.5 text-muted-foreground" aria-hidden="true" />}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {choices.map(option => <DropdownMenuItem key={option.id} onClick={() => toggleSort(option)}>
+          {option.header}{sortIcon(option.id)}
+        </DropdownMenuItem>)}
+      </DropdownMenuContent>
+    </DropdownMenu>;
+  }
+
   return (
     <div className="flex min-w-0 flex-col gap-3">
       {server ? null : (
@@ -170,118 +215,102 @@ export function DataTable<TRow extends { id: string }>({
         </div>
       )}
 
-      {renderMobileCard ? (
-        <div className="flex min-w-0 flex-col gap-3 md:hidden">
-          <label className="flex min-w-0 flex-col gap-1 text-sm">
-            Сортировка
-            <select
-              aria-label="Сортировка"
-              className="min-h-12 w-full min-w-0 rounded-lg border bg-background px-2 text-sm"
-              value={activeSortId ? `${activeSortId}:${activeSortDir}` : ""}
-              onChange={(event) => {
-                const [id, direction] = event.target.value.split(":");
-                const dir = direction === "desc" ? "desc" : "asc";
-                if (server) server.onSortChange(id, dir);
-                else { setSortId(id); setSortDir(dir); setPage(0); }
-              }}
-            >
-              {!activeSortId && <option value="">По умолчанию</option>}
-              {columns.filter((column) => column.sortable && (server || column.sortValue)).flatMap((column) => [
-                <option key={`${column.id}:asc`} value={`${column.id}:asc`}>{column.header} ↑</option>,
-                <option key={`${column.id}:desc`} value={`${column.id}:desc`}>{column.header} ↓</option>,
-              ])}
-            </select>
-          </label>
-          {pageRows.map((row) => <article key={row.id} data-slot="mobile-list-card"
-            aria-label={rowAriaLabel?.(row)}
-            tabIndex={onRowClick ? 0 : undefined}
-            className={cn("rounded-xl border p-4", onRowClick && "cursor-pointer focus-visible:outline-ring", rowClassName?.(row))}
-            onClick={event => {
-              // Ссылки и кнопки внутри карточки сохраняют собственное действие.
-              if (event.target instanceof Element && event.target.closest("a,button,input,select,textarea,[role='button']")) return;
-              if (rowAriaLabel) event.currentTarget.focus({ preventScroll: true });
-              onRowClick?.(row);
-            }}
-            onKeyDown={event => {
-              if (onRowClick && event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
-                event.preventDefault(); onRowClick(row);
-              }
-            }}>{renderMobileCard(row)}</article>)}
-          {pageRows.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">{emptyText}</p>}
-        </div>
-      ) : null}
-
-      <div className={cn("min-w-0 rounded-xl border", renderMobileCard && "hidden md:block")}>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              {columns.map((column) => (
-                <TableHead key={column.id} className={column.headerClassName}>
-                  {column.sortable && (column.sortValue || server) ? (
-                    <button
-                      type="button"
-                      className={cn(
-                        "flex items-center gap-1 hover:text-foreground",
-                        column.headerClassName?.includes("text-right") &&
-                          "w-full justify-end",
-                      )}
-                      onClick={() => toggleSort(column)}
-                    >
-                      {column.header}
-                      {activeSortId === column.id ? (
-                        activeSortDir === "asc" ? (
-                          <ArrowUp className="size-3.5" />
-                        ) : (
-                          <ArrowDown className="size-3.5" />
-                        )
-                      ) : (
-                        <ArrowUpDown className="size-3.5 opacity-40" />
-                      )}
-                    </button>
-                  ) : (
-                    column.header
-                  )}
-                </TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {pageRows.map((row) => (
-              <TableRow
-                key={row.id}
-                aria-label={rowAriaLabel?.(row)}
-                tabIndex={rowAriaLabel && onRowClick ? 0 : undefined}
-                className={cn(onRowClick && "cursor-pointer", rowAriaLabel && "focus-visible:outline-ring", rowClassName?.(row))}
-                onClick={event => {
-                  if (rowAriaLabel && event.target instanceof Element && event.target.closest("a,button,input,select,textarea,[role='button']")) return;
-                  if (rowAriaLabel) event.currentTarget.focus({ preventScroll: true });
-                  onRowClick?.(row);
-                }}
-                onKeyDown={event => {
-                  if (rowAriaLabel && onRowClick && event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
-                    event.preventDefault(); onRowClick(row);
-                  }
+      <div className={hasSummary ? "min-w-0 overflow-hidden rounded-xl border" : "contents"}>
+        {hasSummary && <div className="border-b px-3 py-2">{tableSummary}</div>}
+        {renderMobileCard ? (
+          <div className={cn("flex min-w-0 flex-col gap-3 md:hidden", hasSummary && "p-2")}>
+            <label className="flex min-w-0 flex-col gap-1 text-sm">
+              Сортировка
+              <select
+                aria-label="Сортировка"
+                className="min-h-12 w-full min-w-0 rounded-lg border bg-background px-2 text-sm"
+                value={activeSortId ? `${activeSortId}:${activeSortDir}` : ""}
+                onChange={(event) => {
+                  const [id, direction] = event.target.value.split(":");
+                  const dir = direction === "desc" ? "desc" : "asc";
+                  if (server) server.onSortChange(id, dir);
+                  else { setSortId(id); setSortDir(dir); setPage(0); }
                 }}
               >
+                {!activeSortId && <option value="">По умолчанию</option>}
+                {sortOptions.filter((column) => server || column.sortValue).flatMap((column) => [
+                  <option key={`${column.id}:asc`} value={`${column.id}:asc`}>{column.header} ↑</option>,
+                  <option key={`${column.id}:desc`} value={`${column.id}:desc`}>{column.header} ↓</option>,
+                ])}
+              </select>
+            </label>
+            {pageRows.map((row) => <article key={row.id} data-slot="mobile-list-card"
+              aria-label={rowAriaLabel?.(row)}
+              tabIndex={onRowClick ? 0 : undefined}
+              className={cn("rounded-xl border p-4", onRowClick && "cursor-pointer focus-visible:outline-ring", rowClassName?.(row))}
+              onClick={event => {
+                // Ссылки и кнопки внутри карточки сохраняют собственное действие.
+                if (event.target instanceof Element && event.target.closest("a,button,input,select,textarea,[role='button']")) return;
+                if (rowAriaLabel) event.currentTarget.focus({ preventScroll: true });
+                onRowClick?.(row);
+              }}
+              onKeyDown={event => {
+                if (onRowClick && event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+                  event.preventDefault(); onRowClick(row);
+                }
+              }}>{renderMobileCard(row)}</article>)}
+            {pageRows.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">{emptyText}</p>}
+          </div>
+        ) : null}
+
+        <div className={cn("min-w-0", !hasSummary && "rounded-xl border", renderMobileCard && "hidden md:block")}>
+          <Table>
+            <TableHeader className={tableHeaderClassName}>
+              <TableRow>
                 {columns.map((column) => (
-                  <TableCell key={column.id} className={column.className}>
-                    {column.cell(row)}
-                  </TableCell>
+                  <TableHead
+                    key={column.id}
+                    className={column.headerClassName}
+                    aria-label={column.additionalSorts?.length ? column.header : undefined}
+                  >
+                    {renderHeading(column)}
+                  </TableHead>
                 ))}
               </TableRow>
-            ))}
-            {pageRows.length === 0 ? (
-              <TableRow>
-                <TableCell
-                  colSpan={columns.length}
-                  className="py-12 text-center text-muted-foreground"
+            </TableHeader>
+            <TableBody>
+              {pageRows.map((row) => (
+                <TableRow
+                  key={row.id}
+                  aria-label={rowAriaLabel?.(row)}
+                  tabIndex={rowAriaLabel && onRowClick ? 0 : undefined}
+                  className={cn(onRowClick && "cursor-pointer", rowAriaLabel && "focus-visible:outline-ring", rowClassName?.(row))}
+                  onClick={event => {
+                    if (rowAriaLabel && event.target instanceof Element && event.target.closest("a,button,input,select,textarea,[role='button']")) return;
+                    if (rowAriaLabel) event.currentTarget.focus({ preventScroll: true });
+                    onRowClick?.(row);
+                  }}
+                  onKeyDown={event => {
+                    if (rowAriaLabel && onRowClick && event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+                      event.preventDefault(); onRowClick(row);
+                    }
+                  }}
                 >
-                  {emptyText}
-                </TableCell>
-              </TableRow>
-            ) : null}
-          </TableBody>
-        </Table>
+                  {columns.map((column) => (
+                    <TableCell key={column.id} className={column.className}>
+                      {column.cell(row)}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
+              {pageRows.length === 0 ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={columns.length}
+                    className="py-12 text-center text-muted-foreground"
+                  >
+                    {emptyText}
+                  </TableCell>
+                </TableRow>
+              ) : null}
+            </TableBody>
+          </Table>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
@@ -315,9 +344,9 @@ export function DataTable<TRow extends { id: string }>({
               {server?.onShowAll ? <SelectItem value="all">Все</SelectItem> : null}
             </SelectContent>
           </Select>
-          <span>
+          {!hasSummary && <span>
             · {totalCount} {totalCount === 1 ? "запись" : "записей"}
-          </span>
+          </span>}
         </div>
         {!allRows && <div className="flex items-center gap-2">
           <Button
