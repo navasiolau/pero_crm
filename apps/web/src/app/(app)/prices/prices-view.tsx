@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/page-header";
 import { useState, useTransition } from "react";
 import { Pencil, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -163,20 +164,15 @@ export function PricesView({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Прайсы</h1>
-          <p className="text-sm text-muted-foreground">
-            Расценки на работы. Цена фиксируется в работе на момент назначения —
-            изменение прайса не переписывает прошлое.
-          </p>
-        </div>
-        {canManage ? (
+      <PageHeader
+        title="Прайсы"
+        description="Расценки на работы. Цена фиксируется в работе на момент назначения — изменение прайса не переписывает прошлое."
+        actions={canManage ? (
           <Button onClick={openCreate}>
             <Plus className="size-4" /> Расценка
           </Button>
         ) : null}
-      </div>
+      />
 
       <DataTable
         columns={columns}

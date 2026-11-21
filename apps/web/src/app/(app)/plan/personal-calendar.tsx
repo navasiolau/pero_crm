@@ -1,4 +1,5 @@
 "use client";
+import { PageHeader } from "@/components/page-header";
 import {useMemo,useState,useTransition} from 'react';
 import Link from 'next/link';
 import {BarChart3,ChevronLeft,ChevronRight,Plus} from 'lucide-react';
@@ -46,7 +47,18 @@ export function PersonalCalendar({initialMonth,initialDate,initialEntries}:{init
  if(!result.ok){setError(result.error);if(result.kind==='conflict')setEntries(await loadCalendarMonth(month));return;}accept(result.entry);
  }
  return <section className="min-w-0 space-y-4" aria-labelledby="personal-plan-title">
- <div className="flex flex-wrap items-center justify-between gap-3"><div><h1 id="personal-plan-title" className="text-xl font-semibold">План</h1><p className="text-sm text-muted-foreground">Личный календарь · {CALENDAR_TIMEZONE}</p></div><div className="flex flex-wrap gap-2"><Link className={buttonVariants({variant:'outline'})} href={`/plan/analytics?from=${month}-01&to=${days.filter(day=>day.inMonth).at(-1)!.date}`}><BarChart3 className="size-4"/>Аналитика</Link><Button disabled={pending} onClick={openCreate}><Plus className="size-4"/>Добавить запись</Button></div></div>
+ <PageHeader
+  title="План"
+  titleId="personal-plan-title"
+  titleClassName="text-xl"
+  description={<>Личный календарь · {CALENDAR_TIMEZONE}</>}
+  actions={
+   <>
+    <Link className={buttonVariants({variant:'outline'})} href={`/plan/analytics?from=${month}-01&to=${days.filter(day=>day.inMonth).at(-1)!.date}`}><BarChart3 className="size-4"/>Аналитика</Link>
+    <Button disabled={pending} onClick={openCreate}><Plus className="size-4"/>Добавить запись</Button>
+   </>
+  }
+ />
  {error&&!editor?<p role="alert" className="text-sm text-destructive">{error}</p>:null}
  <PlanHoursSummary title="Часы за месяц" summary={summary.total}/>
  <p className="text-xs text-muted-foreground">Плановые часы по дате записи. Отменённые записи в часы не входят.</p>

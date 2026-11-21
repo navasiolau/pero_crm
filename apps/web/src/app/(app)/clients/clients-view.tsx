@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/page-header";
 import { useState } from "react";
 import Link from "next/link";
 import { Pencil, Plus } from "lucide-react";
@@ -112,17 +113,13 @@ export function ClientsView({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Клиенты</h1>
-          <p className="text-sm text-muted-foreground">
-            Клик по строке — просмотр карточки клиента
-          </p>
-        </div>
-        {canManage ? <Button onClick={openCreate}>
+      <PageHeader
+        title="Клиенты"
+        description="Клик по строке — просмотр карточки клиента"
+        actions={canManage ? <Button onClick={openCreate}>
           <Plus className="size-4" /> Клиент
         </Button> : null}
-      </div>
+      />
 
       <DataTable
         columns={columns}

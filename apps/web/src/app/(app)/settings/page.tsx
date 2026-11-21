@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { canAccessSettingsPath } from "@/lib/settings-access";
@@ -48,12 +49,10 @@ export default async function SettingsPage() {
   const admin = hasAnyRole(session.user.roles, ADMIN_ROLES);
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Настройки</h1>
-        <p className="text-sm text-muted-foreground">
-          {admin ? "Управление системой — доступно администратору и директору" : "Проценты новых изделий"}
-        </p>
-      </div>
+      <PageHeader
+        title="Настройки"
+        description={admin ? "Управление системой — доступно администратору и директору" : "Проценты новых изделий"}
+      />
       <div className="grid gap-4 sm:grid-cols-2">
         {sections.filter(section => canAccessSettingsPath(session.user.roles, section.href)).map((section) => (
           <Link key={section.href} href={section.href}>

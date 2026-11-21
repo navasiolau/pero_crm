@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/page-header";
 import { useState, useTransition } from "react";
 import { LayoutGrid, Table2 } from "lucide-react";
 
@@ -105,33 +106,32 @@ export function TasksPageView({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <h1 className="text-2xl font-semibold">Задачи</h1>
-          <p className="text-sm text-muted-foreground">
-            Клик по задаче — просмотр{canEdit ? " и редактирование" : ""};
-            на канбане статус меняется перетаскиванием
-          </p>
-        </div>
-        <ToggleGroup
-          value={[view]}
-          onValueChange={(value) => {
-            const next = value[0] as "kanban" | "table" | undefined;
-            if (!next) return;
-            setView(next);
-            startTransition(async () => {
-              await saveViewPreference("tasks.view", next);
-            });
-          }}
-        >
-          <ToggleGroupItem value="kanban" aria-label="Канбан">
-            <LayoutGrid className="size-4" />
-          </ToggleGroupItem>
-          <ToggleGroupItem value="table" aria-label="Таблица">
-            <Table2 className="size-4" />
-          </ToggleGroupItem>
-        </ToggleGroup>
-      </div>
+      <PageHeader
+        title="Задачи"
+        description={<>
+          Клик по задаче — просмотр{canEdit ? " и редактирование" : ""}; на канбане статус меняется перетаскиванием
+        </>}
+        actions={
+          <ToggleGroup
+            value={[view]}
+            onValueChange={(value) => {
+              const next = value[0] as "kanban" | "table" | undefined;
+              if (!next) return;
+              setView(next);
+              startTransition(async () => {
+                await saveViewPreference("tasks.view", next);
+              });
+            }}
+          >
+            <ToggleGroupItem value="kanban" aria-label="Канбан">
+              <LayoutGrid className="size-4" />
+            </ToggleGroupItem>
+            <ToggleGroupItem value="table" aria-label="Таблица">
+              <Table2 className="size-4" />
+            </ToggleGroupItem>
+          </ToggleGroup>
+        }
+      />
 
       {view === "kanban" ? (
         <TasksKanban

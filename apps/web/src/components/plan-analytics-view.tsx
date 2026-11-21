@@ -1,7 +1,7 @@
 "use client";
+import { PageHeader } from "@/components/page-header";
 import {useState} from 'react';
 import Link from 'next/link';
-import { PageBackLink } from '@/components/page-back-link';
 import {Button,buttonVariants} from '@/components/ui/button';
 import {Input} from '@/components/ui/input';
 import {Label} from '@/components/ui/label';
@@ -41,11 +41,10 @@ export function PlanAnalyticsView({query,report,error}:{query:CalendarAnalyticsQ
  ];
  const entries=(report?.entries??[]).filter(entry=>state==='ALL'||entry.state===state);
  return <div className="flex min-w-0 flex-col gap-5">
-  <header className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2">
-    <PageBackLink href="/plan" label="К личному плану" />
-    <h1 className="text-2xl font-semibold">Аналитика плана</h1>
-    <p className="col-start-2 text-sm text-muted-foreground">Ваши записи и плановые часы по дате в плане. Europe/Moscow.</p>
-  </header>
+  <PageHeader
+    title="Аналитика плана"
+    description="Ваши записи и плановые часы по дате в плане. Europe/Moscow."
+  />
   <form method="get" action="/plan/analytics" className="flex flex-wrap items-end gap-3 rounded-xl border p-4">
    <div><Label htmlFor="plan-analytics-from">С даты</Label><Input id="plan-analytics-from" name="from" type="date" defaultValue={query.from} required className="mt-1"/></div>
    <div><Label htmlFor="plan-analytics-to">По дату включительно</Label><Input id="plan-analytics-to" name="to" type="date" defaultValue={query.to} required className="mt-1"/></div>

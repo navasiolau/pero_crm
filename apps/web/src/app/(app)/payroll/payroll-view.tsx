@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/page-header";
 import type { ReactNode } from "react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -169,12 +170,10 @@ export function PayrollView({
 
   return (
     <div className="flex min-w-0 flex-col gap-8">
-      <div>
-        <h1 className="text-2xl font-semibold">Моя зарплата</h1>
-        <p className="text-sm text-muted-foreground">
-          Текущие суммы и история ваших начислений и выплат.
-        </p>
-      </div>
+      <PageHeader
+        title="Моя зарплата"
+        description="Текущие суммы и история ваших начислений и выплат."
+      />
 
       <section aria-labelledby="payroll-now" className="flex flex-col gap-3">
         <h2 id="payroll-now" className="text-lg font-semibold">Сейчас</h2>

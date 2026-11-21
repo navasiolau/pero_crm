@@ -3,10 +3,10 @@ import { projectProposalPdfFile } from "@/server/kp/project-pdf";
 import { paymentView } from "@/server/finance/payment-view";
 import { loadProjectStockExpenses, projectExpenseRows } from "@/server/finance/project-expenses";
 import nextDynamic from "next/dynamic";
-import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
 import { notFound, redirect } from "next/navigation";
 import type { ComponentType } from "react";
-import { ArrowLeft, TriangleAlert } from "lucide-react";
+import { TriangleAlert } from "lucide-react";
 
 import { auth } from "@/auth";
 import { Badge } from "@/components/ui/badge";
@@ -162,23 +162,23 @@ export default async function ProjectPage({
       delivery: showOverviewAmount ? pricingProjection ? pricingProjection.delivery : project.delivery?.toString() ?? null : null, unloading: showOverviewAmount ? pricingProjection ? pricingProjection.unloading : project.unloading?.toString() ?? null : null, installation: showOverviewAmount ? pricingProjection ? pricingProjection.installation : project.installation?.toString() ?? null : null,
     }}>
     <div className="flex min-w-0 flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <Link
-          href={resolveProjectReturn(queryParams.returnTo)}
-          className="text-muted-foreground hover:text-foreground"
-          aria-label="К списку проектов"
-        >
-          <ArrowLeft className="size-5" />
-        </Link>
-        <ProjectInlineHeading number={project.number} />
-        <div className="ml-auto"><ProjectDeleteButton projectId={project.id} canManage={canManage}/></div>
-        {showMaterials && hasShortage ? (
-          <Badge variant="destructive">
-            <TriangleAlert />
-            Нехватка материалов
-          </Badge>
-        ) : null}
-      </div>
+      <PageHeader
+        title={
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <ProjectInlineHeading number={project.number} />
+          </div>
+        }
+        back={{ href: resolveProjectReturn(queryParams.returnTo), label: "К списку проектов" }}
+        actions={<>
+          <ProjectDeleteButton projectId={project.id} canManage={canManage} />
+          {showMaterials && hasShortage ? (
+            <Badge variant="destructive">
+              <TriangleAlert />
+              Нехватка материалов
+            </Badge>
+          ) : null}
+        </>}
+      />
 
       <ProjectTabs initialTab={initialTab}>
         <ProjectTabsList>

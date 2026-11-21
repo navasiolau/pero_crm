@@ -1,9 +1,10 @@
+import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export function PayrollSettingsForm() {
   return (
     <div className="flex flex-col gap-6">
-      <div><h1 className="text-2xl font-semibold">Зарплата</h1><p className="text-sm text-muted-foreground">Общие параметры начислений и расчётников</p></div>
+      <PageHeader title="Зарплата" description="Общие параметры начислений и расчётников" />
       <Card className="max-w-xl">
         <CardHeader><CardTitle className="text-lg">Валюта зарплаты</CardTitle></CardHeader>
         <CardContent className="flex flex-col gap-3">

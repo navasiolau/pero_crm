@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/page-header";
 import { useRef, useState, type ReactNode } from "react";
 import { Maximize2, Minimize2 } from "lucide-react";
 import Link from "next/link";
@@ -11,7 +12,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { OrganizationExpenseMobileCard, organizationExpenseColumns, organizationExpensePurpose } from "@/components/organization-expense-row";
 import { PaymentDialog } from "@/components/payment-dialog";
-import { PageBackLink } from "@/components/page-back-link";
 import { ReportDocumentButton } from "@/components/report-document-button";
 import { formatAmount, formatDate, formatQty, formatMoneyTotal } from "@/lib/format";
 import { INTERNAL_CURRENCY } from "@/lib/internal-currency";
@@ -63,16 +63,16 @@ export function OrganizationPaymentsView({ direction, rows, cashAccounts, projec
     { id: "actions", header: "", cell: row => <Button variant="ghost" disabled={row.project?.archived || Boolean(row.stockPurchase || row.receiptLines?.length) || Boolean(row.logisticsTripId)} onClick={event => { event.stopPropagation(); setDeleting(row); }}>Удалить</Button> },
   ];
   return <section className={income ? "flex min-w-0 flex-col gap-5" : "@container/expenses flex min-w-0 flex-col gap-3"}>
-    <header className={cn("flex flex-wrap items-center justify-between", income ? "gap-3" : "gap-2")}>
-      <div className="flex min-w-0 max-w-full items-center gap-2">
-        <PageBackLink href="/finance" label="Назад к финансам" />
-        <h1 className={cn("min-w-0 wrap-anywhere font-semibold", income ? "text-2xl" : "text-xl")}>{title}</h1>
-      </div>
-      <div className="flex max-w-full flex-wrap gap-2">
-        {stockMaterials && <Button variant="outline" onClick={() => setPurchaseOpen(true)}>Приход на склад</Button>}
-        <Button onClick={() => setOpen(true)}>Добавить {noun}</Button>
-      </div>
-    </header>
+    <PageHeader
+      title={title}
+      titleClassName={income ? "text-2xl" : "text-xl"}
+      actions={
+        <>
+          {stockMaterials && <Button variant="outline" onClick={() => setPurchaseOpen(true)}>Приход на склад</Button>}
+          <Button onClick={() => setOpen(true)}>Добавить {noun}</Button>
+        </>
+      }
+    />
     {income && <p className="text-sm text-muted-foreground">Общий приход без проекта входит в баланс и оборот организации; экономика отдельных проектов не меняется.</p>}
     {beforeTable}
     <DataTable columns={income ? incomeColumns : organizationExpenseColumns} rows={rows} server={tableServer} tableSummary={tableSummary}

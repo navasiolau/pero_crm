@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/page-header";
 import { useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -53,9 +54,9 @@ export function NotificationsView({
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
       <div className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold">Уведомления</h1>
-          {unread > 0 ? (
+        <PageHeader
+          title="Уведомления"
+          actions={unread > 0 ? (
             <Button
               variant="outline"
               disabled={pending}
@@ -68,7 +69,7 @@ export function NotificationsView({
               Прочитать все ({unread})
             </Button>
           ) : null}
-        </div>
+        />
 
         {items.map((item) => (
           <Card key={item.id} className={item.read ? "opacity-60" : ""}>

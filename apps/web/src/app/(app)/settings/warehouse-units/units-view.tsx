@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/page-header";
 import { useState, useTransition } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -28,10 +29,13 @@ export function MaterialUnitsView({ rows }: { rows: MaterialUnitView[] }) {
     </div> },
   ];
   return <div className="flex flex-col gap-4">
-    <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><h1 className="text-2xl font-semibold">Единицы склада</h1><p className="mt-2 max-w-2xl text-sm text-muted-foreground">Единицу нельзя удалить, пока её использует номенклатура, включая неактивные материалы. Смена единицы не пересчитывает количества и цены.</p></div>
-      <Button onClick={() => edit(null)}><Plus className="size-4" /> Добавить единицу</Button>
-    </div>
+    <PageHeader
+      title="Единицы склада"
+      description={<p className="mt-2 max-w-2xl text-sm text-muted-foreground">Единицу нельзя удалить, пока её использует номенклатура, включая неактивные материалы. Смена единицы не пересчитывает количества и цены.</p>}
+      actions={
+        <Button onClick={() => edit(null)}><Plus className="size-4" /> Добавить единицу</Button>
+      }
+    />
     <DataTable rows={rows} columns={columns} searchPlaceholder="Поиск единицы…" emptyText="Единиц пока нет — добавьте первую" onRowClick={edit} />
     <Dialog open={editOpen} onOpenChange={setEditOpen}><DialogContent>
       <DialogHeader><DialogTitle>{editing ? "Переименовать единицу" : "Новая единица"}</DialogTitle><DialogDescription>Например: л, лист, 1/10 листа. При переименовании обновится обозначение у всех связанных материалов.</DialogDescription></DialogHeader>

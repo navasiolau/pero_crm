@@ -1,4 +1,5 @@
 'use client';
+import { PageHeader } from "@/components/page-header";
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -36,7 +37,12 @@ export function ProposalsWorkspace({ actorId }: { actorId: string }) {
     { id: 'stage', header: 'Проект', cell: row => row.project ? <Link onClick={event => event.stopPropagation()} className="underline underline-offset-4" href={'/projects/' + row.project.id}>Открыть проект</Link> : '—' },
     { id: 'updated', header: 'Обновлено', sortable: true, sortValue: row => row.updatedAt, cell: row => stamp(row.updatedAt) },
   ];
-  return <div className="flex min-w-0 flex-col gap-4"><div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-xl font-semibold">КП и договоры</h1><Button disabled={busy} onClick={() => void create()}><Plus className="size-4" />{busy ? 'Создание…' : 'Новое КП'}</Button></div>
+  return <div className="flex min-w-0 flex-col gap-4">
+    <PageHeader
+      title="КП и договоры"
+      titleClassName="text-xl"
+      actions={<Button disabled={busy} onClick={() => void create()}><Plus className="size-4" />{busy ? 'Создание…' : 'Новое КП'}</Button>}
+    />
     {error ? <p role="alert" className="text-sm text-destructive">{error} <Button variant="link" onClick={() => void load()}>Повторить</Button></p> : null}
     <DataTable rows={rows} columns={columns} searchPlaceholder="Номер, проект или клиент" onRowClick={row => router.push('/kp/' + encodeURIComponent(row.id))}
       renderMobileCard={row => <div className="space-y-1"><b>{(row.number ?? row.project?.number) ? 'КП №' + (row.number ?? row.project?.number) : row.name}</b><p>{row.client?.label ?? row.printedClientName ?? '—'}</p><p className="text-xs text-muted-foreground">{stamp(row.updatedAt)}</p></div>} />

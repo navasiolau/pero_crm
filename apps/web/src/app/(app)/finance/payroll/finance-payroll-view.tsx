@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/page-header";
 import { payrollMonth } from "@/lib/payroll-month";
 import { initialCashAccount } from "@/lib/cash-account-default";
 import { useRef, useState, useTransition } from "react";
@@ -271,25 +272,23 @@ export function FinancePayrollView({
   });
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">Зарплата</h1>
-          <p className="text-sm text-muted-foreground">
-            Закрытие месяца: сводка по сотрудникам, выплаты, экспорт
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <MonthSwitcher month={month} />
-          <a
-            className={buttonVariants({ variant: "outline" })}
-            href={`/finance/payroll/export?month=${month}`}
-            download
-          >
-            <Download className="size-4" />
-            Экспорт CSV
-          </a>
-        </div>
-      </div>
+      <PageHeader
+        title="Зарплата"
+        description="Закрытие месяца: сводка по сотрудникам, выплаты, экспорт"
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <MonthSwitcher month={month} />
+            <a
+              className={buttonVariants({ variant: "outline" })}
+              href={`/finance/payroll/export?month=${month}`}
+              download
+            >
+              <Download className="size-4" />
+              Экспорт CSV
+            </a>
+          </div>
+        }
+      />
 
       {settlementUnavailable ? <p className="text-sm text-destructive">Расчёт всех недоступен: исторические суммы не имеют подтверждённого BYN-эквивалента.</p> : null}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

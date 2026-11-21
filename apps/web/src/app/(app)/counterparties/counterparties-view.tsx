@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/page-header";
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Plus, Search } from "lucide-react";
@@ -51,10 +52,13 @@ export function CounterpartiesView({ rows }: { rows: CounterpartyView[] }) {
   function openEditor(item: CounterpartyView | null) { setViewingId(null); setEditing(item); setEditOpen(true); }
 
   return <div className="flex min-w-0 flex-col gap-4">
-    <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><h1 className="text-2xl font-semibold">Контрагенты</h1><p className="text-sm text-muted-foreground">Поставщики и перевозчики. Клик по строке — карточка контрагента.</p></div>
-      <Button onClick={() => openEditor(null)}><Plus className="size-4" /> Контрагент</Button>
-    </div>
+    <PageHeader
+      title="Контрагенты"
+      description="Поставщики и перевозчики. Клик по строке — карточка контрагента."
+      actions={
+        <Button onClick={() => openEditor(null)}><Plus className="size-4" /> Контрагент</Button>
+      }
+    />
     <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,24rem)_14rem] sm:items-end">
       <div className="min-w-0 space-y-1.5"><Label htmlFor="counterparty-search">Поиск</Label><div className="relative"><Search className="absolute top-2.5 left-2 size-4 text-muted-foreground" /><Input id="counterparty-search" className="pl-8" placeholder="Компания, телефон, комментарий…" value={query} onChange={event => { setQuery(event.target.value); setPage(1); }} /></div></div>
       <div className="min-w-0 space-y-1.5"><Label htmlFor="counterparty-filter">Тип контрагента</Label><Select value={typeFilter} onValueChange={value => { if (value === "ALL" || value === "SUPPLIER" || value === "CARRIER") { setTypeFilter(value); setPage(1); } }}>

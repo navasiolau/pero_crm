@@ -6,6 +6,8 @@ import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchCardBrowser } from "./product-card-navigation-browser.mjs";
+import { assertPageHeader } from "./page-header-routes-dom.mjs";
+import pageHeaderRoutes from "./page-header-routes.json" with { type: "json" };
 
 const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(path.join(web, "package.json"));
@@ -14,6 +16,7 @@ import React, { useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { Toaster } from "sonner";
 import { OrganizationExpenseResults } from "@/components/organization-expense-results";
+import { PageNavigationProvider } from "@/components/page-navigation-provider";
 import { ListParamsProvider } from "@/lib/list-params";
 import { resolveListState } from "@/lib/list-state";
 import { parseListFilterValue } from "@/lib/list-filter-values";
@@ -56,10 +59,10 @@ function App() {
     <Toaster/>
   </main>;
 }
-createRoot(document.getElementById("root")).render(<App/>);
+createRoot(document.getElementById("root")).render(<PageNavigationProvider scope="test" home="/"><App/></PageNavigationProvider>);
 `;
 const boundaries = {
-  "next/navigation": 'export const useRouter = () => ({ replace(href) { history.replaceState(null, "", href); dispatchEvent(new Event("expense-fixture-route")); }, refresh() {} });',
+  "next/navigation": 'export const usePathname = () => location.pathname; export const useSearchParams = () => location.search; export const useRouter = () => ({ replace(href) { history.replaceState(null, "", href); dispatchEvent(new Event("expense-fixture-route")); }, refresh() {} });',
   "@/server/logistics/reallocation-actions": 'export const readTripReallocation=async()=>({ok:false}); export const readTripReallocationProducts=readTripReallocation; export const previewTripReallocation=readTripReallocation; export const saveTripReallocation=readTripReallocation;',
   "next/link": 'export default function Link({ children, ...props }) { return <a {...props}>{children}</a>; }',
   "@/components/payment-dialog": "export function PaymentDialog() { return null; }",
@@ -113,6 +116,7 @@ test("реестр расходов в Chromium сохраняет фильтр�
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
     await page.goto(url);
+    await assertPageHeader(page, pageHeaderRoutes["/finance/expenses"].back);
     const table = page.getByRole("table");
     const header = table.getByRole("columnheader");
     await expect(header).toHaveCount(7);
@@ -121,7 +125,6 @@ test("реестр расходов в Chromium сохраняет фильтр�
     await page.keyboard.press("Tab");
     await expect(backLink).toBeFocused();
     await expect(backLink).toHaveCSS("outline-style", "solid");
-    await expect(backLink).toHaveAttribute("href", "/finance");
     const ledgerUrl = page.url();
     await title.click();
     await expect(page).toHaveURL(ledgerUrl);
@@ -409,6 +412,7 @@ test("реестр расходов в Chromium сохраняет фильтр�
     await page.keyboard.press("Escape");
     await expect(page.getByText("34 расхода", { exact: true })).toBeVisible();
     await page.goto(url);
+    await assertPageHeader(page, pageHeaderRoutes["/finance/expenses"].back);
     await expect(page.getByText("34 расхода", { exact: true })).toBeVisible();
 
     await page.setViewportSize({ width: 390, height: 844 });

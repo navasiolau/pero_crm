@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/page-header";
 import { HandCoins } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,10 +15,10 @@ export function AdvancesView({ users, accounts }: { users: EmployeeOption[]; acc
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
-      <header>
-        <h1 className="flex items-center gap-2 text-2xl font-semibold"><HandCoins className="size-6" /> Выдача аванса</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Выберите сотрудника и кассу. Сумма вводится в валюте кассы; перед выдачей проверьте эквиваленты и курсы.</p>
-      </header>
+      <PageHeader
+        title={<h1 className="flex items-center gap-2 text-2xl font-semibold"><HandCoins className="size-6" /> Выдача аванса</h1>}
+        description={<p className="mt-1 text-sm text-muted-foreground">Выберите сотрудника и кассу. Сумма вводится в валюте кассы; перед выдачей проверьте эквиваленты и курсы.</p>}
+      />
 
       <div className="grid gap-3 sm:grid-cols-2">
         {availableAccounts.map((account) => (

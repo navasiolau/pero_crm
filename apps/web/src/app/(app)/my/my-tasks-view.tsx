@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/page-header";
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -274,32 +275,32 @@ export function MyTasksView({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="text-2xl font-semibold">Мои задачи</h1>
-          <p className="text-sm text-muted-foreground">
-            {userName}, у вас активных задач: {activeTasks.length}
-          </p>
-        </div>
-        <ToggleGroup
-          value={[view]}
-          onValueChange={(value) => {
-            const next = value[0] as "list" | "kanban" | undefined;
-            if (!next) return;
-            setView(next);
-            startTransition(async () => {
-              await saveViewPreference("my.view", next);
-            });
-          }}
-        >
-          <ToggleGroupItem value="list" aria-label="Список">
-            <List className="size-4" />
-          </ToggleGroupItem>
-          <ToggleGroupItem value="kanban" aria-label="Канбан">
-            <LayoutGrid className="size-4" />
-          </ToggleGroupItem>
-        </ToggleGroup>
-      </div>
+      <PageHeader
+        title="Мои задачи"
+        description={<>
+          {userName}, у вас активных задач: {activeTasks.length}
+        </>}
+        actions={
+          <ToggleGroup
+            value={[view]}
+            onValueChange={(value) => {
+              const next = value[0] as "list" | "kanban" | undefined;
+              if (!next) return;
+              setView(next);
+              startTransition(async () => {
+                await saveViewPreference("my.view", next);
+              });
+            }}
+          >
+            <ToggleGroupItem value="list" aria-label="Список">
+              <List className="size-4" />
+            </ToggleGroupItem>
+            <ToggleGroupItem value="kanban" aria-label="Канбан">
+              <LayoutGrid className="size-4" />
+            </ToggleGroupItem>
+          </ToggleGroup>
+        }
+      />
 
       {view === "list" ? (
         <>

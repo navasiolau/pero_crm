@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/page-header";
 import { useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Plus, Search } from "lucide-react";
@@ -91,14 +92,28 @@ export function LogisticsWorkspace({ data }: { data: LogisticsWorkspaceData }) {
   if (data.mode === "manage" && data.canDelete) columns.push({ id: "actions", header: "Действия",
     cell: row => row.mode === "manage" ? <LogisticsDeleteButton trip={row} onDeleted={() => deleted(row.id)} /> : null });
 
+  const description = manage
+    ? "Одна строка — одна отгрузка. Общий рейс виден во всех его проектах."
+    : "Накладные отгрузок: просмотр и скачивание ТТН.";
+  const createTripAction = manage ? (
+    <Button type="button" onClick={() => { setSelected(null); setCreating(true); }}>
+      <Plus className="size-4" />Новый рейс
+    </Button>
+  ) : null;
+
   return (
     <div className="flex min-w-0 flex-col gap-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div><h2 className="text-xl font-semibold">{projectId ? "Логистика проекта" : "Логистика"}</h2>
-          <p className="text-sm text-muted-foreground">{manage ? "Одна строка — одна отгрузка. Общий рейс виден во всех его проектах." : "Накладные отгрузок: просмотр и скачивание ТТН."}</p>
+      {projectId ? (
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-semibold">Логистика проекта</h2>
+            <p className="text-sm text-muted-foreground">{description}</p>
+          </div>
+          {createTripAction}
         </div>
-        {manage && <Button type="button" onClick={() => { setSelected(null); setCreating(true); }}><Plus className="size-4" />Новый рейс</Button>}
-      </div>
+      ) : (
+        <PageHeader title="Логистика" titleClassName="text-xl" description={description} actions={createTripAction} />
+      )}
       {data.mode === "manage" && data.budget && <BudgetSummary budget={data.budget} />}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       <form className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4" onSubmit={event => { event.preventDefault(); if (dateFrom && dateTo && dateFrom > dateTo) { setError("Дата начала должна быть не позже даты окончания"); return; } setError(""); change({ q: query, projectId: projectId ?? (projectFilter || undefined), dateFrom: dateFrom || undefined, dateTo: dateTo || undefined }); }}>

@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import {
   Card,
   CardContent,
@@ -38,13 +39,15 @@ export default async function ApiSettingsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold">API и токены</h1>
-        <p className="text-sm text-muted-foreground">
-          REST API <code>/api/v1</code> для плагинов и внешних интеграций.
-          Авторизация — заголовок <code>Authorization: Bearer pero_…</code>.
-        </p>
-      </div>
+      <PageHeader
+        title="API и токены"
+        description={
+          <>
+            REST API <code>/api/v1</code> для плагинов и внешних интеграций.
+            Авторизация — заголовок <code>Authorization: Bearer pero_…</code>.
+          </>
+        }
+      />
 
       <Card>
         <CardHeader>

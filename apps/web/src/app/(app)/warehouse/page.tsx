@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowLeftRight, Boxes, ClipboardList } from "lucide-react";
@@ -24,12 +25,10 @@ export default async function WarehousePage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Склад</h1>
-        <p className="text-sm text-muted-foreground">
-          Номенклатура материалов, остатки и движения по складу
-        </p>
-      </div>
+      <PageHeader
+        title="Склад"
+        description="Номенклатура материалов, остатки и движения по складу"
+      />
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Link href="/warehouse/stock">
           <Card className="h-full transition-colors hover:bg-accent/50">

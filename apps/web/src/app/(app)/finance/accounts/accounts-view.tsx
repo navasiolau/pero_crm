@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/page-header";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -130,18 +131,16 @@ export function AccountsView({ accounts, defaultCashAccount, canManageDefault }:
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">Кассы</h1>
-          <p className="text-sm text-muted-foreground">
-            Остаток — сумма приходов минус расходы по кассе, в её валюте
-          </p>
-        </div>
-        <Button onClick={() => setAddOpen(true)}>
-          <Plus className="size-4" />
-          Добавить кассу
-        </Button>
-      </div>
+      <PageHeader
+        title="Кассы"
+        description="Остаток — сумма приходов минус расходы по кассе, в её валюте"
+        actions={
+          <Button onClick={() => setAddOpen(true)}>
+            <Plus className="size-4" />
+            Добавить кассу
+          </Button>
+        }
+      />
 
       <Link href="/finance/accounts/report" className="text-sm font-medium text-primary hover:underline">Отчёт по кассам за период →</Link>
       <div className="flex max-w-xl flex-col gap-2 rounded-lg border p-4">

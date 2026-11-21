@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import nextDynamic from "next/dynamic";
 import type { ComponentType } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -34,10 +35,14 @@ export default async function DemoProjectPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center gap-3">
-        <h1 className="text-2xl font-semibold">П-2026-001 · Кухня «Модерн»</h1>
-        <Badge variant="secondary">демо</Badge>
-      </div>
+      <PageHeader
+        title={
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <h1 className="min-w-0 break-words text-2xl font-semibold">П-2026-001 · Кухня «Модерн»</h1>
+            <Badge variant="secondary">демо</Badge>
+          </div>
+        }
+      />
 
       <Tabs defaultValue="main">
         <TabsList>
