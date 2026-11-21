@@ -45,7 +45,7 @@ function OptionsContent({ options, value, searchPlaceholder, emptyText, allowCle
     <div className="relative mb-2"><Search className="absolute top-2.5 left-2 size-4 text-muted-foreground" />
       <Input ref={searchInput} value={query} onChange={event => setQuery(event.target.value)} placeholder={searchPlaceholder} className="pl-8" />
     </div>
-    <div className="max-h-56 overflow-y-auto">
+    <div className="max-h-56 overflow-y-auto overscroll-y-contain">
       {allowClear && value ? <button type="button" className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent" onClick={() => onSelect("")}>— сбросить</button> : null}
       {filtered.map(option => <OptionRow key={option.value} option={option} selected={option.value === value} onSelect={onSelect} wrapOptions={wrapOptions} />)}
       {filtered.length === 0 ? <div className="px-2 py-6 text-center text-sm text-muted-foreground">{emptyText}</div> : null}
@@ -64,7 +64,7 @@ export function SearchableSelect({ id, options, value, onChange, placeholder = "
     <PopoverTrigger render={<Button id={id} variant="outline" disabled={disabled} className={cn("w-full justify-between font-normal", className)} />}>
       <span className="truncate">{selected ? selected.label : placeholder}</span><ChevronDown className="size-4 shrink-0 opacity-50" />
     </PopoverTrigger>
-    <PopoverContent className="w-72 p-2" align="start" initialFocus={searchInput}
+    <PopoverContent className="max-h-(--available-height) w-72 p-2" align="start" initialFocus={searchInput}
       style={popupMinWidth === undefined ? undefined : { width: `min(calc(100vw - 24px), max(${popupMinWidth}px, var(--anchor-width)))` }}>
       <OptionsContent options={options} value={value} searchPlaceholder={searchPlaceholder} emptyText={emptyText} allowClear={allowClear} query={query} setQuery={setQuery} searchInput={searchInput} onSelect={onSelect} wrapOptions={wrapOptions} />
     </PopoverContent>

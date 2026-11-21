@@ -91,27 +91,27 @@ function JournalWorkspace({ scope, initialQuery }: { scope: JournalScope; initia
 
   return <div ref={container} tabIndex={-1} className="@container min-w-0 space-y-4 outline-none" data-journal>
     <form onSubmit={apply} className="grid min-w-0 items-end gap-2 sm:grid-cols-2 @min-[58rem]:grid-cols-[minmax(7.5rem,1fr)_minmax(8rem,1fr)_minmax(8rem,1fr)_8.75rem_8.75rem_auto]" aria-label="Фильтры журнала">
-      <div className="min-w-0 space-y-1 sm:col-span-2 @min-[58rem]:col-span-1">
+      <div className="flex min-w-0 flex-col gap-1 sm:col-span-2 @min-[58rem]:col-span-1">
         <label htmlFor={`${controlId}-search`} className="text-xs text-muted-foreground">Поиск по журналу</label>
         <Input id={`${controlId}-search`} value={draft.q} placeholder="Поиск по всей истории…" onChange={event => setDraft(value => ({ ...value, q: event.target.value }))}/>
       </div>
-      <div className="min-w-0 space-y-1">
+      <div className="flex min-w-0 flex-col gap-1">
         <label htmlFor={`${controlId}-actor`} className="text-xs text-muted-foreground">Пользователь</label>
         <SearchableSelect id={`${controlId}-actor`} value={draft.actorId} onChange={actorId => setDraft(value => ({ ...value, actorId }))}
           options={(options?.users ?? []).map(option => ({ value: option.id, label: option.label }))}
           placeholder="Все пользователи" searchPlaceholder="Поиск пользователя…" allowClear wrapOptions disabled={options === null}/>
       </div>
-      <div className="min-w-0 space-y-1">
+      <div className="flex min-w-0 flex-col gap-1">
         <label htmlFor={`${controlId}-entity`} className="text-xs text-muted-foreground">Сущность</label>
         <SearchableSelect id={`${controlId}-entity`} value={draft.entity} onChange={entity => setDraft(value => ({ ...value, entity }))}
           options={(options?.entities ?? []).map(option => ({ value: option.id, label: option.label }))}
           placeholder="Все сущности" searchPlaceholder="Поиск сущности…" allowClear wrapOptions disabled={options === null}/>
       </div>
-      <div className="min-w-0 space-y-1">
+      <div className="flex min-w-0 flex-col gap-1">
         <label htmlFor={`${controlId}-from`} className="text-xs text-muted-foreground">С</label>
         <Input id={`${controlId}-from`} type="date" value={draft.from} onChange={event => setDraft(value => ({ ...value, from: event.target.value }))}/>
       </div>
-      <div className="min-w-0 space-y-1">
+      <div className="flex min-w-0 flex-col gap-1">
         <label htmlFor={`${controlId}-to`} className="text-xs text-muted-foreground">По</label>
         <Input id={`${controlId}-to`} type="date" value={draft.to} onChange={event => setDraft(value => ({ ...value, to: event.target.value }))}/>
       </div>
