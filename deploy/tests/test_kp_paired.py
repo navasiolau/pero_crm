@@ -25,14 +25,16 @@ def image_record(image, revision, service, root, *, renderer_root=None, run="18"
 
 
 class PairedRuntime(FakeRuntime):
-    def __init__(self, *, first=False):
-        super().__init__()
+    def __init__(self, *, first=False, project="crm-staging"):
+        super().__init__(project)
+        network = f"{project}_kp_render"
+        tag = "main" if project == "crm" else "staging"
         secret = "SYNTHETIC_PAIRED_DEPLOY_TEST_SECRET_ONLY"
         self.configuration["services"]["web"].update(environment={"PERO_KP_ENABLED": "1", "PERO_KP_RENDERER_SECRET": secret}, networks={"kp_render": {}})
-        self.configuration["services"]["kp-renderer"] = {"image": watcher.KP_REPOSITORY + ":staging", "profiles": ["kp"], "read_only": True,
+        self.configuration["services"]["kp-renderer"] = {"image": f"{watcher.KP_REPOSITORY}:{tag}", "profiles": ["kp"], "read_only": True,
             "mem_limit": "1536m", "cpus": 1.0, "pids_limit": 128, "tmpfs": ["/tmp:rw,nosuid,exec,size=512m,mode=1777"],
             "networks": {"kp_render": {}}, "environment": {"PERO_KP_RENDERER_SECRET": secret}}
-        self.configuration["networks"] = {"kp_render": {"name": "crm-staging_kp_render", "internal": True}}
+        self.configuration["networks"] = {"kp_render": {"name": network, "internal": True}}
         self.renderer = self.make_renderer(OLD_RENDERER) if not first else None
         self.images = {
             OLD_IMAGE: image_record(OLD_IMAGE, "b" * 40, "web", "sha256:" + "1" * 64, renderer_root=OLD_ROOT, run="17"),
@@ -49,12 +51,13 @@ class PairedRuntime(FakeRuntime):
         self.after_renderer_pull = lambda: None
 
     def make_renderer(self, image):
+        network = f"{self.host}_kp_render"
         result = container(self.host, "kp-renderer", image)
         result["Id"] = "9" * 64
         result["Config"]["User"] = "node"
         result["HostConfig"] = {"ReadonlyRootfs": True, "Memory": 1536 * 1024 * 1024, "NanoCpus": 1_000_000_000,
-            "PidsLimit": 128, "Tmpfs": {"/tmp": "rw,nosuid,exec,size=512m,mode=1777"}, "NetworkMode": "crm-staging_kp_render"}
-        result["NetworkSettings"] = {"Networks": {"crm-staging_kp_render": {}}}
+            "PidsLimit": 128, "Tmpfs": {"/tmp": "rw,nosuid,exec,size=512m,mode=1777"}, "NetworkMode": network}
+        result["NetworkSettings"] = {"Networks": {network: {}}}
         return result
 
     def reserve_pair_rollback(self):
@@ -112,6 +115,43 @@ class PairedRuntime(FakeRuntime):
 
 
 class PairedDeployTests(unittest.TestCase):
+    def protected_production(self, migration_fails=False):
+        runtime = PairedRuntime(project="crm")
+        web = runtime.configuration["services"]["web"]
+        web["environment"].update(PERO_DB_ENFORCE_RUNTIME="1", PERO_DB_MIGRATE_ON_START="1",
+                                  DATABASE_URL="postgresql://app:fixture@db:5432/crm")
+        web["volumes"] = [{"type": "bind", "read_only": True, "bind": {"create_host_path": False},
+                           "source": "/opt/crm/.pero-migrator.env", "target": "/run/pero-crm/migrator.env"}]
+        runtime.images[NEW_IMAGE]["Config"]["Labels"]["pero.crm.runtime-init"] = "1"
+
+        def migrate(_target, _config, _database, reference, image):
+            runtime.calls.append(("migrate", reference, image))
+            if migration_fails:
+                raise watcher.WatchError("migration-deploy-failed")
+
+        runtime.migrate_web = migrate
+        runtime.up_stable_pin = lambda target, references, _config: runtime.up_pair(target, references)
+        return runtime
+
+    def test_production_migration_failure_keeps_root_web_and_renderer_untouched(self):
+        runtime = self.protected_production(migration_fails=True)
+        before = copy.deepcopy((runtime.web, runtime.renderer, runtime.db))
+        with self.assertRaisesRegex(watcher.WatchError, "migration-deploy-failed"):
+            watcher.watch(runtime)
+        self.assertEqual((runtime.web, runtime.renderer, runtime.db), before)
+        self.assertEqual(runtime.pairs, [])
+
+    def test_production_health_failure_after_migration_requires_reviewed_recovery(self):
+        runtime = self.protected_production()
+        runtime.fail_web_new = True
+        with self.assertRaisesRegex(watcher.WatchError, "migration-rollback-requires-reviewed-recovery") as caught:
+            watcher.watch(runtime)
+        self.assertEqual(caught.exception.context["rollback"], "review-required")
+        self.assertEqual(runtime.pairs, [{"web": watcher.WEB_REPOSITORY + "@" + NEW_IMAGE,
+                                         "kp-renderer": watcher.KP_REPOSITORY + "@" + NEW_ROOT}])
+        self.assertLess(runtime.calls.index(("migrate", watcher.WEB_REPOSITORY + "@" + NEW_IMAGE, NEW_IMAGE)),
+                        runtime.calls.index("up:pair"))
+
     def test_disk_spool_profile_keeps_readonly_private_volume_and_refuses_host_mounts(self):
         runtime = PairedRuntime()
         cfg = runtime.configuration

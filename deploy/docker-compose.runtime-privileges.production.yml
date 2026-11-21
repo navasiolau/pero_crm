@@ -1,0 +1,24 @@
+# Только согласованный production: объединить web с существующим docker-compose.override.yml.
+services:
+  web:
+    image: ${CRM_WATCH_WEB_IMAGE:-ghcr.io/navasiolau/pero_crm:main}
+    environment:
+      DATABASE_URL: ${CRM_RUNTIME_DATABASE_URL:?Укажите ограниченный DATABASE_URL}
+      PERO_DB_ENFORCE_RUNTIME: '1'
+      PERO_DB_MIGRATE_ON_START: '1'
+      PERO_DB_MIGRATOR_ROLE: crm
+      PERO_DB_MIGRATION_DATABASE: crm
+      PERO_DB_SKIP_MIGRATION: '0'
+      DB_PASSWORD: ''
+      POSTGRES_PASSWORD: ''
+      DATABASE_MIGRATION_URL: ''
+      CRM_RUNTIME_DATABASE_URL: ''
+      DIRECT_URL: ''
+      SHADOW_DATABASE_URL: ''
+    volumes:
+      - type: bind
+        source: /opt/crm/.pero-migrator.env
+        target: /run/pero-crm/migrator.env
+        read_only: true
+        bind:
+          create_host_path: false

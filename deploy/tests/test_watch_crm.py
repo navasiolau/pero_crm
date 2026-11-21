@@ -17,6 +17,7 @@ from unittest.mock import patch
 OLD_IMAGE = "sha256:" + "1" * 64
 NEW_IMAGE = "sha256:" + "2" * 64
 DB_IMAGE = "sha256:" + "3" * 64
+NEXT_IMAGE = "sha256:" + "7" * 64
 REVISION = "a" * 40
 spec = importlib.util.spec_from_file_location(
     "watch_crm", Path(__file__).resolve().parents[1] / "watch-crm.py"
@@ -371,10 +372,11 @@ class MigrationWatcherTests(unittest.TestCase):
                 )
 
             def value(self, image):
+                run = "30" if image == NEXT_IMAGE else self.desired_run if image == NEW_IMAGE else "10"
                 return {"Id": image, "RepoDigests": [watcher.WEB_REPOSITORY + "@" + image],
                         "Config": {"Labels": {"org.opencontainers.image.revision": REVISION,
                                               "pero.ci.repository": "navasiolau/pero_crm",
-                                              "pero.ci.run": self.desired_run if image == NEW_IMAGE else "10",
+                                              "pero.ci.run": run,
                                               "pero.ci.attempt": "1", "pero.ci.service": "web",
                                               "pero.crm.runtime-init": "1"}}}
 
@@ -392,9 +394,11 @@ class MigrationWatcherTests(unittest.TestCase):
                 if self.migration_drift:
                     self.db["Id"] = "e" * 64
 
-            def up_stable_pin(self, target, references):
+            def up_stable_pin(self, target, references, _config):
                 self.calls.append(("pinned", references))
                 self.up(target)
+                web_config = self.configuration["services"]["web"]
+                self.web["Config"]["Env"] = [f"{key}={value}" for key, value in web_config["environment"].items()]
 
         return Runtime()
 
@@ -408,19 +412,71 @@ class MigrationWatcherTests(unittest.TestCase):
                         runtime.calls.index(("pinned", {"web": reference})))
 
     def test_failed_migration_or_database_drift_does_not_replace_web(self):
-        for fault, reason in (("migration_error", "migration-deploy-failed"), ("migration_drift", "database-drift")):
-            with self.subTest(fault=fault):
-                runtime = self.configured_runtime()
+        faults = (("migration_error", "migration-deploy-failed"), ("migration_drift", "database-drift"))
+        for project in ("crm-staging", "crm"):
+            for fault, reason in faults:
+                runtime = self.configured_runtime(project)
+                before = copy.deepcopy(runtime.web)
                 setattr(runtime, fault, True)
-                with self.assertRaisesRegex(watcher.WatchError, reason):
+                with self.subTest(project=project, fault=fault), self.assertRaisesRegex(watcher.WatchError, reason):
                     watcher.watch(runtime)
                 self.assertNotIn("up:web", runtime.calls)
-                self.assertEqual(runtime.web["Image"], OLD_IMAGE)
+                self.assertEqual(runtime.web, before)
 
-    def test_non_staging_insecure_bind_and_reverse_release_never_migrate(self):
-        wrong = self.configured_runtime("crm")
-        with self.assertRaisesRegex(watcher.WatchError, "migration-mode-refused"):
-            watcher.watch(wrong)
+    def test_production_migrates_two_sequential_releases_before_each_update(self):
+        runtime = self.configured_runtime("crm")
+        database = copy.deepcopy(runtime.db)
+        for image in (NEW_IMAGE, NEXT_IMAGE):
+            runtime.calls.clear()
+            runtime.registry_image = image
+            reference = watcher.WEB_REPOSITORY + "@" + image
+            result = watcher.watch(runtime)
+            self.assertEqual((result["status"], result["project"], result["migration"]),
+                             ("deployed", "crm", "applied"))
+            self.assertEqual(runtime.web["Image"], image)
+            self.assertEqual(runtime.db, database)
+            self.assertLess(runtime.calls.index(("migrate", reference, image, database["Id"])),
+                            runtime.calls.index(("pinned", {"web": reference})))
+        runtime.calls.clear()
+        self.assertEqual(watcher.watch(runtime)["status"], "unchanged")
+        self.assertNotIn("up:web", runtime.calls)
+
+    def test_production_refuses_cross_environment_and_unprotected_configuration(self):
+        for setting, reason in (
+            ("path", "target-mismatch"), ("tag", "compose-image-mismatch"),
+            ("repository", "compose-image-mismatch"), ("bind", "migration-mount-refused"),
+            ("enforce", "migration-mode-refused"), ("skip", "migration-bypass-refused"),
+            ("disabled", "migration-mode-refused"), ("startup", "migration-web-startup-override"),
+            ("credentials", "migration-web-credentials"),
+        ):
+            with self.subTest(setting=setting):
+                runtime = self.configured_runtime("crm")
+                web = runtime.configuration["services"]["web"]
+                env = web["environment"]
+                if setting == "path":
+                    runtime.directory = "/opt/crm-staging"
+                elif setting == "tag":
+                    web["image"] = f"{watcher.WEB_REPOSITORY}:staging"
+                elif setting == "repository":
+                    web["image"] = "ghcr.io/example/pero_crm:main"
+                elif setting == "bind":
+                    web["volumes"][0]["source"] = "/opt/crm-staging/.pero-migrator.env"
+                elif setting == "enforce":
+                    env["PERO_DB_ENFORCE_RUNTIME"] = "0"
+                elif setting == "skip":
+                    env["PERO_DB_SKIP_MIGRATION"] = "1"
+                elif setting == "disabled":
+                    env["PERO_DB_MIGRATE_ON_START"] = "0"
+                elif setting == "startup":
+                    web["command"] = ["node", "apps/web/server.js"]
+                elif setting == "credentials":
+                    env["DB_PASSWORD"] = "fixture"
+                with self.assertRaisesRegex(watcher.WatchError, reason):
+                    watcher.watch(runtime)
+                self.assertNotIn("pull:web", runtime.calls)
+                self.assertNotIn("up:web", runtime.calls)
+
+    def test_insecure_bind_and_reverse_release_never_migrate(self):
         unsafe = self.configured_runtime()
         unsafe.configuration["services"]["web"]["volumes"][0]["read_only"] = False
         with self.assertRaisesRegex(watcher.WatchError, "migration-mount-refused"):
@@ -429,8 +485,23 @@ class MigrationWatcherTests(unittest.TestCase):
         old.desired_run = "9"
         with self.assertRaisesRegex(watcher.WatchError, "migration-rollback-refused"):
             watcher.watch(old)
-        for runtime in (wrong, unsafe, old):
+        for runtime in (unsafe, old):
             self.assertFalse(any(isinstance(call, tuple) and call[0] == "migrate" for call in runtime.calls))
+
+    def test_production_refuses_wrong_immutable_binding_and_missing_init(self):
+        for fault, reason in (("digest", "migration-image-drift"), ("init", "migration-image-runtime-init")):
+            with self.subTest(fault=fault):
+                runtime = self.configured_runtime("crm")
+                if fault == "digest":
+                    runtime.inspect_image_ref = lambda _reference: runtime.value(OLD_IMAGE)
+                else:
+                    desired = runtime.value(NEW_IMAGE)
+                    desired["Config"]["Labels"].pop("pero.crm.runtime-init")
+                    runtime.inspect_image = lambda _target: desired
+                with self.assertRaisesRegex(watcher.WatchError, reason):
+                    watcher.watch(runtime)
+                self.assertFalse(any(isinstance(call, tuple) and call[0] == "migrate" for call in runtime.calls))
+                self.assertNotIn("up:web", runtime.calls)
 
     def test_w07_lock_and_same_image_cutover(self):
         blocked = self.configured_runtime()
@@ -457,11 +528,44 @@ class MigrationWatcherTests(unittest.TestCase):
                 "environment": {"PERO_DB_SKIP_MIGRATION": options["overrides"]["CRM_WATCH_SKIP_MIGRATION"]}}}})
 
         runtime.compose = compose
-        runtime.up_stable_pin(target, {"web": reference}, skip_migration=True)
+        runtime.up_stable_pin(target, {"web": reference}, {}, skip_migration=True)
         self.assertEqual(seen[1][0], ["up", "-d", "--no-deps", "--no-build", "--pull", "never", "web"])
         for _, _, options in seen:
             self.assertNotIn("pin_file", options)
             self.assertEqual(options["overrides"]["CRM_WATCH_SKIP_MIGRATION"], "1")
+
+    def test_production_pin_uses_the_permanent_files_and_rejects_skip_or_mutable_reference(self):
+        runtime = watcher.DockerRuntime()
+        target = watcher.target_for("crm", "/opt/crm")
+        config = self.configured_runtime("crm").configuration
+        web = config["services"]["web"]
+        reference = watcher.WEB_REPOSITORY + "@" + NEW_IMAGE
+        web["environment"]["PERO_DB_SKIP_MIGRATION"] = "0"
+        seen = []
+        pinned_config = copy.deepcopy(config)
+        pinned_config["services"]["web"]["image"] = reference
+
+        def compose(_target, args, operation, **options):
+            seen.append((args, operation, options))
+            return json.dumps(pinned_config)
+
+        runtime.compose = compose
+        for pin, skip, reason in ((reference, True, "migration-pin-target"),
+                                  (target.image, False, "migration-pin-reference"),
+                                  (NEW_IMAGE, False, "migration-pin-reference")):
+            with self.assertRaisesRegex(watcher.WatchError, reason):
+                runtime.up_stable_pin(target, {"web": pin}, config, skip_migration=skip)
+        self.assertEqual(seen, [])
+        runtime.up_stable_pin(target, {"web": reference}, config)
+        self.assertEqual(seen[1][0], ["up", "-d", "--no-deps", "--no-build", "--pull", "never", "web"])
+        for _, _, options in seen:
+            self.assertNotIn("pin_file", options)
+            self.assertEqual(options["overrides"], {"CRM_WATCH_WEB_IMAGE": reference})
+        seen.clear()
+        pinned_config["services"]["web"]["environment"]["DATABASE_URL"] = "postgresql://other:fixture@db:5432/crm"
+        with self.assertRaisesRegex(watcher.WatchError, "migration-pin-config-drift"):
+            runtime.up_stable_pin(target, {"web": reference}, config)
+        self.assertEqual([operation for _, operation, _ in seen], ["migration-pin-config"])
 
     def test_migrator_dsn_rejects_unbound_endpoint_parameters(self):
         self.assertEqual(watcher.bound_database_url("postgresql://crm:x@db:5432/crm?schema=public", "crm"), "crm")

@@ -51,7 +51,7 @@ async function execute() {
 DO $check$ BEGIN
 IF current_database() <> '${database}' OR current_user <> '${role}' OR current_user <> session_user
    OR current_schema() <> 'public' OR pg_is_in_recovery() OR inet_server_addr() IS DISTINCT FROM '${ip}'::inet THEN
-  RAISE EXCEPTION 'CRM staging database identity refused';
+  RAISE EXCEPTION 'CRM database identity refused';
 END IF;
 END $check$;`);
   prisma(["migrate", "deploy"]);
