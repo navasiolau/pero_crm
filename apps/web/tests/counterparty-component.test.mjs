@@ -17,6 +17,11 @@ function Harness(){const[rows,setRows]=React.useState(window.__rows);React.useEf
 createRoot(document.getElementById('root')).render(<Harness/>);
 `, loader: 'tsx', resolveDir: web }, bundle: true, write: false, platform: 'browser', format: 'iife', jsx: 'automatic', tsconfig: path.join(web, 'tsconfig.json'),
     define: { 'process.env.NODE_ENV': '"production"' }, logLevel: 'silent', plugins: [{ name: 'boundaries', setup(b) {
+      b.onResolve({ filter: /^next\/link$/ }, args => ({ path: args.path, namespace: 'link' }));
+      b.onLoad({ filter: /.*/, namespace: 'link' }, () => ({
+        contents: 'export default function Link({ children, replace, onNavigate, ...props }) { return <a {...props}>{children}</a>; }',
+        loader: 'jsx', resolveDir: web,
+      }));
       b.onResolve({ filter: /^(next\/navigation|@\/server\/counterparties\/actions)$/ }, args => ({ path: args.path, namespace: 'boundary' }));
       b.onLoad({ filter: /.*/, namespace: 'boundary' }, args => ({ contents: args.path === 'next/navigation'
         ? 'export const useRouter=()=>({refresh(){window.__refreshes++;}});'
