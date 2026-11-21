@@ -96,15 +96,21 @@ async function checkSelectorLayout(page, expect) {
     await page.mouse.click(x + width / 2, y + height / 2);
   }
   const origin = new URL(page.url()).origin;
-  for (const [scope, width] of [["global", 1440], ["project", 390]]) {
-    await page.setViewportSize({ width, height: 844 });
+  for (const { scope, width, height, sidebar } of [
+    { scope: "global", width: 1920, height: 1040, sidebar: 256 },
+    { scope: "project", width: 840, height: 844, sidebar: 256 },
+    { scope: "project", width: 390, height: 844, sidebar: 0 },
+  ]) {
+    await page.setViewportSize({ width, height });
     await page.goto(`${origin}/?scope=${scope}`);
     const mobile = width < 640;
     await expect(page.locator(mobile ? '[data-slot="mobile-list-card"]' : "tbody tr").first()).toBeVisible();
-    await page.locator("main").evaluate(node => {
+    await page.locator("main").evaluate((node, sidebar) => {
       node.style.marginTop = "240px";
       node.style.minHeight = "150vh";
-    });
+      node.style.marginLeft = `${sidebar}px`;
+      node.style.width = `calc(100% - ${sidebar}px)`;
+    }, sidebar);
     const outside = page.getByLabel("Поиск по журналу", { exact: true });
     for (const { label, search, query, option, other } of cases) {
       const trigger = page.getByLabel(label, { exact: true });
@@ -119,17 +125,36 @@ async function checkSelectorLayout(page, expect) {
       async function checkGeometry(phase) {
         assert.deepEqual(await selectorGeometry(trigger, mobile), closed, `${scope}/${width} ${label} ${phase}`);
       }
+      const popup = page.locator('[data-slot="popover-content"]');
+      async function checkPopupAlignment(phase) {
+        await popup.evaluate(node => Promise.allSettled(node.getAnimations().map(animation => animation.finished)));
+        await expect.poll(async () => {
+          const [anchor, panel] = await Promise.all([trigger.boundingBox(), popup.boundingBox()]);
+          if (!anchor || !panel) return "нет видимого поля или списка";
+          const left = panel.x - anchor.x;
+          const right = panel.x + panel.width - anchor.x - anchor.width;
+          return Math.max(Math.abs(left), Math.abs(right), Math.abs(panel.width - anchor.width)) <= 1
+            ? "совпадают" : { anchor, panel, left, right };
+        }, { message: `${scope}/${width} ${label} ${phase}` }).toBe("совпадают");
+      }
 
       await trigger.click();
       await expect(input).toBeFocused();
       await expect(input).toBeInViewport({ ratio: 1 });
       await expect(item).toBeInViewport({ ratio: 1 });
       await checkGeometry("открытие");
+      await checkPopupAlignment("открытие");
 
       await input.fill(query);
       await expect(item).toBeInViewport({ ratio: 1 });
       await expect(otherItem).toHaveCount(0);
       await checkGeometry("поиск");
+      if (width === 840) {
+        await page.setViewportSize({ width: width + 32, height });
+        await checkPopupAlignment("изменение ширины открытого списка");
+        await page.setViewportSize({ width, height });
+        await checkPopupAlignment("восстановление ширины открытого списка");
+      }
       await page.keyboard.press("Escape");
       await expect(input).toBeHidden();
       await expect(trigger).toBeFocused();

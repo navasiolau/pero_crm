@@ -20,7 +20,7 @@ type Props = {
   placeholder?: string; searchPlaceholder?: string; emptyText?: string; disabled?: boolean;
   allowClear?: boolean; className?: string;
   onOpenChange?: (open: boolean) => void;
-  popupMinWidth?: number; wrapOptions?: boolean;
+  popupMinWidth?: number; matchTriggerWidth?: boolean; wrapOptions?: boolean;
 };
 
 const OptionRow = memo(function OptionRow({ option, selected, onSelect, wrapOptions }: {
@@ -54,7 +54,7 @@ function OptionsContent({ options, value, searchPlaceholder, emptyText, allowCle
 }
 
 // Выпадающий список с поиском: закрытый Portal не исполняет OptionsContent.
-export function SearchableSelect({ id, options, value, onChange, placeholder = "Выберите…", searchPlaceholder = "Поиск…", emptyText = "Ничего не найдено", disabled, allowClear, className, popupMinWidth, wrapOptions, onOpenChange }: Props) {
+export function SearchableSelect({ id, options, value, onChange, placeholder = "Выберите…", searchPlaceholder = "Поиск…", emptyText = "Ничего не найдено", disabled, allowClear, className, popupMinWidth, matchTriggerWidth, wrapOptions, onOpenChange }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const searchInput = useRef<HTMLInputElement>(null);
@@ -64,8 +64,9 @@ export function SearchableSelect({ id, options, value, onChange, placeholder = "
     <PopoverTrigger render={<Button id={id} variant="outline" disabled={disabled} className={cn("w-full justify-between font-normal", className)} />}>
       <span className="truncate">{selected ? selected.label : placeholder}</span><ChevronDown className="size-4 shrink-0 opacity-50" />
     </PopoverTrigger>
-    <PopoverContent className="max-h-(--available-height) w-72 p-2" align="start" initialFocus={searchInput}
-      style={popupMinWidth === undefined ? undefined : { width: `min(calc(100vw - 24px), max(${popupMinWidth}px, var(--anchor-width)))` }}>
+    <PopoverContent align="start" initialFocus={searchInput}
+      className={cn("max-h-(--available-height) p-2", matchTriggerWidth && "w-(--anchor-width) data-open:zoom-in-100 data-closed:zoom-out-100")}
+      style={popupMinWidth === undefined || matchTriggerWidth ? undefined : { width: `min(calc(100vw - 24px), max(${popupMinWidth}px, var(--anchor-width)))` }}>
       <OptionsContent options={options} value={value} searchPlaceholder={searchPlaceholder} emptyText={emptyText} allowClear={allowClear} query={query} setQuery={setQuery} searchInput={searchInput} onSelect={onSelect} wrapOptions={wrapOptions} />
     </PopoverContent>
   </Popover>;
