@@ -270,7 +270,7 @@
   [data-slot="kanban-column"] {
     scroll-snap-align: start;
   }
-  a[aria-label]:has(> svg:only-child) {
+  a[aria-label]:has(> svg:only-child):where(:not([data-slot="page-back-link"])) {
     display: inline-flex;
     min-width: 44px;
     min-height: 44px;

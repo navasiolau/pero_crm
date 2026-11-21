@@ -1,9 +1,8 @@
 "use client";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { resolveProductReturn } from "@/lib/product-return-navigation";
-import { ArrowLeft } from "lucide-react";
+import { PageBackLink } from "@/components/page-back-link";
 import { toast } from "sonner";
 import type { ProductStatus, ProjectStage, Role } from "@prisma/client";
 import { Badge } from "@/components/ui/badge";
@@ -67,7 +66,7 @@ export function ProductHeader({
   const returnDestination = resolveProductReturn(backHref, product.projectId);
   return <div className="flex min-w-0 flex-wrap items-start gap-2">
     <div className="flex min-w-0 flex-wrap items-center gap-2">
-    <Link href={returnDestination.href} aria-label={returnDestination.label} className="inline-flex size-10 shrink-0 items-center justify-center rounded-md hover:bg-muted"><ArrowLeft className="size-4" /></Link>
+    <PageBackLink href={returnDestination.href} label={returnDestination.label} />
     <span className="shrink-0 text-sm text-muted-foreground">{product.number}</span>
     <Badge variant="outline" className={cn("border-transparent", productStatusStyles[localStatus].badge)}>{productStatusLabels[localStatus]}</Badge>
     </div>
