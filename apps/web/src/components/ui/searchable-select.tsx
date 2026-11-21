@@ -65,7 +65,7 @@ export function SearchableSelect({ id, options, value, onChange, placeholder = "
       <span className="truncate">{selected ? selected.label : placeholder}</span><ChevronDown className="size-4 shrink-0 opacity-50" />
     </PopoverTrigger>
     <PopoverContent align="start" initialFocus={searchInput}
-      className={cn("max-h-(--available-height) p-2", matchTriggerWidth && "w-(--anchor-width) data-open:zoom-in-100 data-closed:zoom-out-100")}
+      className={cn("max-h-(--available-height) p-2", matchTriggerWidth && "w-(--anchor-width) ring-inset data-open:zoom-in-100 data-closed:zoom-out-100")}
       style={popupMinWidth === undefined || matchTriggerWidth ? undefined : { width: `min(calc(100vw - 24px), max(${popupMinWidth}px, var(--anchor-width)))` }}>
       <OptionsContent options={options} value={value} searchPlaceholder={searchPlaceholder} emptyText={emptyText} allowClear={allowClear} query={query} setQuery={setQuery} searchInput={searchInput} onSelect={onSelect} wrapOptions={wrapOptions} />
     </PopoverContent>
