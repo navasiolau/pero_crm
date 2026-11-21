@@ -99,13 +99,13 @@ function JournalWorkspace({ scope, initialQuery }: { scope: JournalScope; initia
         <label htmlFor={`${controlId}-actor`} className="text-xs text-muted-foreground">Пользователь</label>
         <SearchableSelect id={`${controlId}-actor`} value={draft.actorId} onChange={actorId => setDraft(value => ({ ...value, actorId }))}
           options={(options?.users ?? []).map(option => ({ value: option.id, label: option.label }))}
-          placeholder="Все пользователи" searchPlaceholder="Поиск пользователя…" allowClear wrapOptions disabled={options === null}/>
+          placeholder="Все пользователи" searchPlaceholder="Поиск пользователя…" allowClear wrapOptions matchTriggerWidth disabled={options === null}/>
       </div>
       <div className="flex min-w-0 flex-col gap-1">
         <label htmlFor={`${controlId}-entity`} className="text-xs text-muted-foreground">Сущность</label>
         <SearchableSelect id={`${controlId}-entity`} value={draft.entity} onChange={entity => setDraft(value => ({ ...value, entity }))}
           options={(options?.entities ?? []).map(option => ({ value: option.id, label: option.label }))}
-          placeholder="Все сущности" searchPlaceholder="Поиск сущности…" allowClear wrapOptions disabled={options === null}/>
+          placeholder="Все сущности" searchPlaceholder="Поиск сущности…" allowClear wrapOptions matchTriggerWidth disabled={options === null}/>
       </div>
       <div className="flex min-w-0 flex-col gap-1">
         <label htmlFor={`${controlId}-from`} className="text-xs text-muted-foreground">С</label>
