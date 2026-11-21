@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import { Journal } from "@/components/journal/journal";
 import { requireAdmin } from "@/server/require-role";
 import type { JournalQueryInput } from "@/server/changelog/query-contract";
@@ -19,10 +20,10 @@ export default async function ChangelogPage({ searchParams }: {
     dir: direction === "asc" ? "asc" : "desc",
   };
   return <div className="flex min-w-0 flex-col gap-6">
-    <div>
-      <h1 className="text-2xl font-semibold">Журнал изменений</h1>
-      <p className="text-sm text-muted-foreground">История изменений и важных операций в CRM. Нажмите строку, чтобы открыть событие целиком.</p>
-    </div>
+    <PageHeader
+      title="Журнал изменений"
+      description="История изменений и важных операций в CRM. Нажмите строку, чтобы открыть событие целиком."
+    />
     <Journal initialQuery={initialQuery}/>
   </div>;
 }

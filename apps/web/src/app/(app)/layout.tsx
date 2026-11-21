@@ -11,6 +11,8 @@ import {isCalendarEnabled} from "@/lib/calendar-access";
 import {canUseKpEditor} from "@/lib/kp-editor-access";
 import { auth } from "@/auth";
 import { AppShell } from "@/components/app-shell";
+import { PageNavigationProvider } from "@/components/page-navigation-provider";
+import { homePathForRoles } from "@/lib/home-route";
 import { NotificationsBell } from "@/components/notifications-bell";
 
 export default async function AppLayout({
@@ -24,6 +26,12 @@ export default async function AppLayout({
   if (!session?.user) {
     redirect(scoped ? "/telegram/finance" : "/login");
   }
+  const scope = JSON.stringify([session.user.id, [...session.user.roles].sort(), telegram]);
+  const content = (
+    <PageNavigationProvider key={scope} scope={scope} home={telegram ? "/finance" : homePathForRoles(session.user.roles)}>
+      {children}
+    </PageNavigationProvider>
+  );
 
   if (telegram) {
     return (
@@ -36,7 +44,7 @@ export default async function AppLayout({
             <TelegramFinanceLinkSettings />
           </nav>
         </header>
-        <main className="mx-auto min-w-0 max-w-7xl px-4 py-5"><TelegramFileViewerScope>{children}</TelegramFileViewerScope></main>
+        <main className="mx-auto min-w-0 max-w-7xl px-4 py-5"><TelegramFileViewerScope>{content}</TelegramFileViewerScope></main>
       </div>
     );
   }
@@ -53,7 +61,7 @@ export default async function AppLayout({
       }}
       headerExtras={<NotificationsBell />}
     >
-      {children}
+      {content}
     </AppShell>
   );
 }

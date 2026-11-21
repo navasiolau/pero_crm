@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/page-header";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import {Button} from '@/components/ui/button';
@@ -182,12 +183,10 @@ export function MovementsView({
   if(canDelete)columns.push({id:'actions',header:'',cell:deleteButton});
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-semibold">Движения</h1>
-        <p className="text-sm text-muted-foreground">
-          Приходы, списания на изделия и возвраты — последние 500 операций
-        </p>
-      </div>
+      <PageHeader
+        title="Движения"
+        description="Приходы, списания на изделия и возвраты — последние 500 операций"
+      />
 
       <div className="flex flex-wrap items-center gap-3">
         <SearchableSelect

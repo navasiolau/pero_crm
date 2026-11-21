@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/page-header";
 import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Plus, Power } from "lucide-react";
@@ -96,18 +97,16 @@ export function ArticlesView({ articles }: { articles: ExpenseArticleView[] }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">Статьи расходов</h1>
-          <p className="text-sm text-muted-foreground">
-            Зарплата статьёй не нужна — она учитывается из начислений по задачам
-          </p>
-        </div>
-        <Button ref={createButton} onClick={openAdd}>
-          <Plus className="size-4" />
-          Добавить статью
-        </Button>
-      </div>
+      <PageHeader
+        title="Статьи расходов"
+        description="Зарплата статьёй не нужна — она учитывается из начислений по задачам"
+        actions={
+          <Button ref={createButton} onClick={openAdd}>
+            <Plus className="size-4" />
+            Добавить статью
+          </Button>
+        }
+      />
 
       <DataTable
         columns={columns}

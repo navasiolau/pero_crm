@@ -1,6 +1,5 @@
-import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import {
@@ -52,28 +51,17 @@ export default async function ModuleDetailPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <Link
-            href="/settings/modules"
-            className="text-muted-foreground hover:text-foreground"
-            aria-label="К списку модулей"
-          >
-            <ArrowLeft className="size-5" />
-          </Link>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-semibold">{plugin.name}</h1>
-              <Badge variant="secondary">v{plugin.version}</Badge>
-              <Badge variant="outline">API {plugin.apiVersion}</Badge>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              {plugin.description}
-            </p>
+      <PageHeader
+        title={
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="wrap-anywhere text-2xl font-semibold">{plugin.name}</h1>
+            <Badge variant="secondary">v{plugin.version}</Badge>
+            <Badge variant="outline">API {plugin.apiVersion}</Badge>
           </div>
-        </div>
-        <PluginToggle pluginId={plugin.id} enabled={plugin.enabled} />
-      </div>
+        }
+        description={plugin.description}
+        actions={<PluginToggle pluginId={plugin.id} enabled={plugin.enabled} />}
+      />
 
       {manifest.settingsSchema && manifest.settingsSchema.length > 0 ? (
         <Card>

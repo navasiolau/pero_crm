@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/page-header";
 import { useRef, useState, useTransition } from "react";
 import { FolderPlus, Pencil, Plus, Power } from "lucide-react";
 import { toast } from "sonner";
@@ -193,15 +194,11 @@ export function ItemsView({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">Номенклатура</h1>
-          <p className="text-sm text-muted-foreground">
-            Клик по строке — просмотр карточки материала
-          </p>
-        </div>
-        {canManage ? (
-          <div className="flex gap-2">
+      <PageHeader
+        title="Номенклатура"
+        description="Клик по строке — просмотр карточки материала"
+        actions={canManage ? (
+          <>
             <Button variant="outline" onClick={() => setCategoriesOpen(true)}>
               <FolderPlus className="size-4" />
               Категории
@@ -210,9 +207,9 @@ export function ItemsView({
               <Plus className="size-4" />
               Добавить материал
             </Button>
-          </div>
+          </>
         ) : null}
-      </div>
+      />
 
       <DataTable
         columns={columns}

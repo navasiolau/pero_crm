@@ -7,6 +7,7 @@ import { TriangleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { DataTable, type DataColumn } from "@/components/ui/data-table";
 import { useListParams } from "@/lib/list-params";
+import { projectDetailHref } from "@/lib/project-return-navigation";
 import { cn } from "@/lib/utils";
 import { daysOnStage, stageLabels, stageStyles } from "@/lib/stages";
 
@@ -30,7 +31,7 @@ export function ProjectsTable({
   showAmount: boolean;
   onOpen: (id: string) => void;
 }) {
-  const { get, set } = useListParams();
+  const { get, set, query } = useListParams();
 
   const columns: DataColumn<ProjectCard>[] = [
     {
@@ -117,7 +118,7 @@ export function ProjectsTable({
       rows={projects}
       renderMobileCard={(row) => (
         <div className="flex flex-col items-start gap-3 text-sm">
-          <Link href={`/projects/${row.id}`} className="min-h-12 w-full min-w-0 font-medium underline-offset-2 [overflow-wrap:anywhere] hover:underline">
+          <Link href={projectDetailHref(row.id, query)} className="min-h-12 w-full min-w-0 font-medium underline-offset-2 [overflow-wrap:anywhere] hover:underline">
             <span className="block text-xs text-muted-foreground">Проект <CardNumber>{row.number}</CardNumber></span>
             {row.title}
           </Link>

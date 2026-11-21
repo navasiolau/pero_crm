@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 
@@ -25,13 +26,10 @@ export default async function ModulesPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Модули</h1>
-        <p className="text-sm text-muted-foreground">
-          Включение и настройка плагинов. Данные модулей при выключении не
-          удаляются.
-        </p>
-      </div>
+      <PageHeader
+        title="Модули"
+        description="Включение и настройка плагинов. Данные модулей при выключении не удаляются."
+      />
       <div className="grid gap-4">
         {plugins.map((plugin) => (
           <Card key={plugin.id}>

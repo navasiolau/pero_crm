@@ -8,6 +8,7 @@ import { ChartAreaInteractive } from "@/components/chart-area-interactive"
 import { PluginSlot } from "@/components/plugins/plugin-slot"
 import { RecentProjects } from "@/components/recent-projects"
 import { SectionCards } from "@/components/section-cards"
+import { PageHeader } from "@/components/page-header"
 import { formatAmount } from "@/lib/format"
 import { displayClientName } from "@/lib/labels"
 import { homePathForRoles } from "@/lib/home-route"
@@ -53,6 +54,7 @@ export default async function DashboardPage() {
 
   return (
     <div className="flex flex-col gap-4 md:gap-6">
+      <PageHeader title="Дашборд" />
       <SectionCards
         cards={[
           {

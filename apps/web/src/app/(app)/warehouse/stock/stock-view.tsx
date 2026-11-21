@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/page-header";
 import { useState, useTransition } from "react";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -148,23 +149,23 @@ export function StockView({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">Остатки</h1>
-          <p className="text-sm text-muted-foreground">
-            Остаток — приходы и возвраты минус списания на проекты
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-        {purchaseOptions ? <Button disabled={rows.some(row=>!row.warehouseReady)} onClick={() => setPurchaseOpen(true)}><Plus className="size-4" />Приход</Button> : null}
-        {canManage ? (
-          <Button variant="outline" disabled={rows.some(row=>!row.warehouseReady)} onClick={() => setIncomeOpen(true)}>
-            <Plus className="size-4" />
-            Инвентарный приход
-          </Button>
-        ) : null}
-        </div>
-      </div>
+      <PageHeader
+        title="Остатки"
+        description="Остаток — приходы и возвраты минус списания на проекты"
+        actions={<>
+          {purchaseOptions ? (
+            <Button disabled={rows.some(row => !row.warehouseReady)} onClick={() => setPurchaseOpen(true)}>
+              <Plus className="size-4" />Приход
+            </Button>
+          ) : null}
+          {canManage ? (
+            <Button variant="outline" disabled={rows.some(row => !row.warehouseReady)} onClick={() => setIncomeOpen(true)}>
+              <Plus className="size-4" />
+              Инвентарный приход
+            </Button>
+          ) : null}
+        </>}
+      />
 
       <DataTable
         columns={columns}

@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/page-header";
 import { useEffect, useState, useTransition } from "react";
 import { Pencil, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -245,18 +246,15 @@ export function UsersView({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Пользователи</h1>
-          <p className="text-sm text-muted-foreground">
-            Сотрудники организации: ФИО, должность, контакты, роль и схема
-            оплаты
-          </p>
-        </div>
-        <Button onClick={openCreate}>
-          <Plus className="size-4" /> Сотрудник
-        </Button>
-      </div>
+      <PageHeader
+        title="Пользователи"
+        description="Сотрудники организации: ФИО, должность, контакты, роль и схема оплаты"
+        actions={
+          <Button onClick={openCreate}>
+            <Plus className="size-4" /> Сотрудник
+          </Button>
+        }
+      />
 
       <DataTable
         columns={columns}

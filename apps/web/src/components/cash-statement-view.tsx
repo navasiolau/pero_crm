@@ -1,7 +1,7 @@
 "use client";
+import { PageHeader } from "@/components/page-header";
 import {useRef,useState} from "react";
 import Link from "next/link";
-import { PageBackLink } from "@/components/page-back-link";
 import {ChevronRight} from "lucide-react";
 import {Button} from "@/components/ui/button";
 import {Input} from "@/components/ui/input";
@@ -49,11 +49,10 @@ export function CashStatementView({query,report,error}:{query:CashStatementQuery
   {id:"document",header:"Отчётные документы",searchValue:row=>(row.documents??(row.document?[row.document]:[])).map(file=>file.fileName).join(" "),cell:row=>row.document||row.documents?.length?<ReportDocumentButton document={row.document} documents={row.documents}/>:"—"},
  ];
  return <div className="flex min-w-0 flex-col gap-5">
-  <header className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2">
-    <PageBackLink href="/finance/accounts" label="К кассам" />
-    <h1 className="text-2xl font-semibold">Отчёт по кассам</h1>
-    <p className="col-start-2 text-sm text-muted-foreground">Остатки и движение денег, включая зарплаты и авансы. Расходы показаны со знаком минус.</p>
-  </header>
+  <PageHeader
+    title="Отчёт по кассам"
+    description="Остатки и движение денег, включая зарплаты и авансы. Расходы показаны со знаком минус."
+  />
   <form method="get" action="/finance/accounts/report" className="flex flex-wrap items-end gap-3 rounded-xl border p-4">
    <div className="min-w-0"><Label htmlFor="cash-from">С даты</Label><Input id="cash-from" name="from" type="date" defaultValue={query.from} required className="mt-1 w-full"/></div>
    <div className="min-w-0"><Label htmlFor="cash-to">По дату включительно</Label><Input id="cash-to" name="to" type="date" defaultValue={query.to} required className="mt-1 w-full"/></div>

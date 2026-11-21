@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/page-header";
 import { useState } from "react";
 import { LayoutGrid, Table2 } from "lucide-react";
 import type { ProductStatus, ProjectStage, Role } from "@prisma/client";
@@ -81,30 +82,27 @@ export function ProductsView({
 
   return (
     <div className="flex h-full flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="text-2xl font-semibold">Изделия</h1>
-          <p className="text-sm text-muted-foreground">
-            Доступные вам изделия — карточка открывается по клику; разрешённый
-            переход статуса доступен перетаскиванием
-          </p>
-        </div>
-        <ToggleGroup
-          value={[view]}
-          onValueChange={(value) => {
-            const next = value[0] as "kanban" | "table" | undefined;
-            if (!next) return;
-            switchView(next);
-          }}
-        >
-          <ToggleGroupItem value="kanban" aria-label="Канбан">
-            <LayoutGrid className="size-4" />
-          </ToggleGroupItem>
-          <ToggleGroupItem value="table" aria-label="Таблица">
-            <Table2 className="size-4" />
-          </ToggleGroupItem>
-        </ToggleGroup>
-      </div>
+      <PageHeader
+        title="Изделия"
+        description="Доступные вам изделия — карточка открывается по клику; разрешённый переход статуса доступен перетаскиванием"
+        actions={
+          <ToggleGroup
+            value={[view]}
+            onValueChange={(value) => {
+              const next = value[0] as "kanban" | "table" | undefined;
+              if (!next) return;
+              switchView(next);
+            }}
+          >
+            <ToggleGroupItem value="kanban" aria-label="Канбан">
+              <LayoutGrid className="size-4" />
+            </ToggleGroupItem>
+            <ToggleGroupItem value="table" aria-label="Таблица">
+              <Table2 className="size-4" />
+            </ToggleGroupItem>
+          </ToggleGroup>
+        }
+      />
 
       <ProductsFilterBar
         actorRoles={actorRoles}

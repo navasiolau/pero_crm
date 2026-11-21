@@ -1,4 +1,5 @@
 "use client";
+import { PageHeader } from "@/components/page-header";
 import type { SketchFilePreview } from "@/lib/product-hero";
 
 import { useState } from "react";
@@ -14,6 +15,7 @@ import { CreateProjectDialog } from "./create-project-dialog";
 import { KanbanBoard } from "./kanban-board";
 import { ProjectsFilterBar } from "./filter-bar";
 import { ProjectsTable } from "./projects-table";
+import { projectDetailHref } from "@/lib/project-return-navigation";
 
 export interface ProjectCard {
   id: string;
@@ -75,7 +77,7 @@ export function ProjectsView({
   hideEngineerFilter?: boolean;
 }) {
   const router = useRouter();
-  const { set, query, pending } = useListParams();
+  const { set, query, getQuery, pending } = useListParams();
   const [searchText, setSearchText] = useState(() => new URLSearchParams(resolvedQuery).get("q") ?? "");
   const [filterOverlayActive, setFilterOverlayActive] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -86,31 +88,33 @@ export function ProjectsView({
 
   return (
     <div className="flex h-full flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-semibold">Проекты</h1>
-        <div className="flex items-center gap-2">
-          <ToggleGroup
-            value={[view]}
-            onValueChange={(value) => {
-              const next = value[0] as "kanban" | "table" | undefined;
-              if (!next) return;
-              switchView(next);
-            }}
-          >
-            <ToggleGroupItem value="kanban" aria-label="Канбан">
-              <LayoutGrid className="size-4" />
-            </ToggleGroupItem>
-            <ToggleGroupItem value="table" aria-label="Таблица">
-              <Table2 className="size-4" />
-            </ToggleGroupItem>
-          </ToggleGroup>
-          {canManage ? (
-            <Button onClick={() => setCreateOpen(true)}>
-              <Plus className="size-4" /> Проект
-            </Button>
-          ) : null}
-        </div>
-      </div>
+      <PageHeader
+        title="Проекты"
+        actions={
+          <div className="flex items-center gap-2">
+            <ToggleGroup
+              value={[view]}
+              onValueChange={(value) => {
+                const next = value[0] as "kanban" | "table" | undefined;
+                if (!next) return;
+                switchView(next);
+              }}
+            >
+              <ToggleGroupItem value="kanban" aria-label="Канбан">
+                <LayoutGrid className="size-4" />
+              </ToggleGroupItem>
+              <ToggleGroupItem value="table" aria-label="Таблица">
+                <Table2 className="size-4" />
+              </ToggleGroupItem>
+            </ToggleGroup>
+            {canManage ? (
+              <Button onClick={() => setCreateOpen(true)}>
+                <Plus className="size-4" /> Проект
+              </Button>
+            ) : null}
+          </div>
+        }
+      />
 
       <ProjectsFilterBar
         actorRoles={actorRoles}
@@ -142,7 +146,7 @@ export function ProjectsView({
           page={page}
           pageSize={pageSize}
           showAmount={showAmount}
-          onOpen={(id) => router.push(`/projects/${id}`)}
+          onOpen={(id) => router.push(projectDetailHref(id, getQuery()))}
         />
       )}
 
@@ -151,7 +155,7 @@ export function ProjectsView({
         onOpenChange={setCreateOpen}
         clients={clients}
         managers={managers}
-        onCreated={(id) => router.push(`/projects/${id}`)}
+        onCreated={(id) => router.push(projectDetailHref(id, getQuery()))}
       />
     </div>
   );

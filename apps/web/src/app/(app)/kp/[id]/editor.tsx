@@ -1,4 +1,5 @@
 'use client';
+import { PageHeader } from "@/components/page-header";
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -77,8 +78,13 @@ export function KpEditor({ documentId }: { documentId: string }) {
   const clientOptions = document?.client ? [{ value: document.client.id, label: document.client.label }] : [];
   const activeVersion = versions.find(version => version.id === versionId);
   const busy = pending || contractOpen;
+  const projectNumber = document?.id === documentId ? document.project?.number : undefined;
   return <div className="flex min-w-0 flex-1 flex-col gap-3">
-    <div className="flex flex-wrap items-end gap-2"><Link href="/kp" className="mr-2 self-center text-sm underline underline-offset-4">КП и договоры</Link>
+    <PageHeader
+      title={projectNumber ? `КП №${projectNumber}` : 'Редактор коммерческого предложения'}
+      titleClassName="text-xl"
+    />
+    <div className="flex flex-wrap items-end gap-2">
       <div className="min-w-44 flex-1 space-y-1"><Label htmlFor="kp-client">Клиент CRM</Label><ClientSelect id="kp-client" options={clientOptions} value={document?.client?.id ?? ''} disabled={!canChangeClient || busy} onChange={id => { setPending(true); setError(null); void selectClient(id).catch(error => setError(error.message)).finally(() => setPending(false)); }} /></div>
       <Button variant="outline" disabled={!canEdit || busy} onClick={() => void openRate()}>Курс{document?.fx ? ' · ' + document.fx.rate : ''}</Button>
       <div className="min-w-52 flex-1 space-y-1"><Label htmlFor="kp-version">Версия КП · Москва</Label><SearchableSelect id="kp-version" options={[{ value: '', label: 'Текущая редакция' }, ...versions.map(version => ({ value: version.id, label: versionLabel(version) }))]} value={versionId} disabled={busy || !document} onChange={versionId => void execute({ type: 'version', versionId })} /></div>

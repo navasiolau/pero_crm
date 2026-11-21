@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
 import { FolderKanban, HandCoins, Landmark, ReceiptText, Wallet } from "lucide-react";
 import { PAYROLL_MANAGE_ROLES, hasAnyRole } from "@/lib/roles";
@@ -14,12 +15,10 @@ export default async function FinancePage() {
   const session = await requireFinance();
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Финансы</h1>
-        <p className="text-sm text-muted-foreground">
-          Кассы, платежи с курсами НБ РБ, экономика проектов, зарплата
-        </p>
-      </div>
+      <PageHeader
+        title="Финансы"
+        description="Кассы, платежи с курсами НБ РБ, экономика проектов, зарплата"
+      />
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Link href="/finance/accounts/report"><Card className="h-full transition-colors hover:bg-accent/50"><CardHeader><Landmark className="mb-2 size-6 text-muted-foreground"/><CardTitle>Отчёт по кассам</CardTitle><CardDescription>Остатки и движение денег за период, зарплаты и авансы</CardDescription></CardHeader></Card></Link>
         <Link href="/finance/expenses"><Card className="h-full transition-colors hover:bg-accent/50"><CardHeader><ReceiptText className="mb-2 size-6 text-muted-foreground"/><CardTitle>Расходы организации</CardTitle><CardDescription>Общие и проектные расходы по статьям с отчётными документами</CardDescription></CardHeader></Card></Link>
