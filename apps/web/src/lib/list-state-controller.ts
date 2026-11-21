@@ -69,9 +69,10 @@ export class ListStateController {
     this.schedule(updateListQuery(this.options.section, this.snapshot.query, updates), true);
   }
 
-  reset() {
+  reset(filters?: Record<string, null>) {
     this.snapshot = { ...this.snapshot, searchRevision: this.snapshot.searchRevision + 1 };
-    this.schedule(this.defaultQuery(), true);
+    const query = filters ? updateListQuery(this.options.section, this.snapshot.query, filters) : this.defaultQuery();
+    this.schedule(query, true);
   }
 
   private schedule(query: string, navigate: boolean) {

@@ -99,13 +99,13 @@ const documentView={id:'report',fileName:'Receipt103.pdf',mimeType:'application/
 const paidRow={id:'paid',direction:'EXPENSE',amount:60,currency:'BYN',rate:1,rateDate:null,bynAmount:60,projectAmount:null,paidAt:'2026-10-07T09:00:00Z',comment:'Оплаченная закупка',cashAccountName:'Основная касса',expenseArticleName:'Материалы',createdByName:'Бухгалтер',project:null,reportDocument:documentView,
  reportDocuments:[documentView,{id:'report2',fileName:'Receipt195.png',mimeType:'image/png',source:'finance'},{id:'report3',fileName:'Invoice195.pdf',mimeType:'application/pdf',source:'finance'}],
  stockPurchase:{movementId:'movement',materialName:'Петля',unit:'шт',quantity:3,unitPrice:20,stockValueByn:60}};
-async function withLedger(mode,run){
+async function withLedger(mode,run,payments=[paidRow]){
  const context=await browser.newContext({viewport:{width:1440,height:1000}});
  try{
   const page=await context.newPage();page.setDefaultTimeout(5000);const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.route('http://localhost:3199/**',route=>route.request().url()==='http://localhost:3199/ledger'?route.fulfill({contentType:'text/html',body:'<style>'+cssText+'</style><main id="root" class="min-w-0 p-4"></main>'}):route.abort());
   const cssText=await css;await page.goto('http://localhost:3199/ledger');
-  await page.evaluate(({mode,paidRow})=>{window.__ledger=mode;window.__payments=[paidRow];window.__requests=[];window.__returns=[];}, {mode,paidRow});
+  await page.evaluate(({mode,payments})=>{window.__ledger=mode;window.__payments=payments;window.__requests=[];window.__returns=[];}, {mode,payments});
   await page.route('**/api/finance/documents/upload',async route=>{
    const body=route.request().postDataBuffer();assert.ok(body?.includes(Buffer.from('Receipt103.pdf')));assert.ok(body?.includes(Buffer.from('clientMutationId')));
    await route.fulfill({status:201,contentType:'application/json',body:JSON.stringify({ok:true,document:documentView})});
@@ -135,8 +135,9 @@ test('paid stock keeps optional document, computed amount and mobile footer; ord
   await expense.getByRole('link',{name:'Receipt103.pdf',exact:true}).waitFor();assert.equal(await pay.isEnabled(),true);
   await pay.scrollIntoViewIfNeeded();const expenseBox=await pay.boundingBox();assert.ok(expenseBox&&expenseBox.y>=0&&expenseBox.y+expenseBox.height<=844,'EXPENSE_FOOTER_UNREACHABLE');
   await expense.getByRole('button',{name:'Отмена',exact:true}).click();
-  await page.getByRole('article').filter({hasText:'Приход на склад'}).getByText('Приход на склад · Петля',{exact:true}).click();
+  await page.getByRole('article',{name:'Открыть расход · Приход на склад',exact:true}).getByText('Приход на склад',{exact:true}).click();
   const detail=page.getByRole('dialog',{name:'Расход',exact:true});await detail.getByRole('heading',{name:'Расход',exact:true}).waitFor();
+  await detail.getByText('Петля',{exact:true}).waitFor();
   assert.ok((await detail.innerText()).includes('Стоимость запаса'));assert.match(await detail.innerText(),/60.*BYN/s);assert.equal(await detail.getByRole('button',{name:'Удалить',exact:true}).isDisabled(),true);
   const document=detail.getByRole('link',{name:'Receipt103.pdf',exact:true});assert.equal(await document.getAttribute('href'),'/api/finance/documents/report');assert.equal(await document.getAttribute('download'),'Receipt103.pdf');
  });
@@ -171,14 +172,30 @@ test('project expense UI filters precise frozen stock costs, follows return sour
  }finally{await context.close();}
 });
 
-test('expense search, desktop/mobile detail and image viewer expose all three receipts without post-payment upload',async()=>{
+test('expense search and compact desktop/mobile documents expose all three receipts without post-payment upload',async()=>{
  await withLedger('organization',async page=>{
+  const table=page.getByRole('table');
+  const unrelated=table.getByRole('row',{name:'Открыть расход · Общий расход организации',exact:true});await unrelated.waitFor();
   await page.getByPlaceholder('Поиск по расходам…').fill('Invoice195.pdf');
-  assert.equal(await page.getByRole('row').filter({hasText:'Invoice195.pdf'}).count(),1);
+  await unrelated.waitFor({state:'detached'});
+  const paid=table.getByRole('row',{name:'Открыть расход · Приход на склад',exact:true});await paid.waitFor();
+  const documents=page.getByRole('dialog',{name:'Документы',exact:true});
+  async function checkDocuments(){
+   const list=documents.getByRole('listitem');await list.first().waitFor();
+   assert.equal(await list.count(),3);
+   assert.equal(await documents.getByRole('link',{name:'Receipt103.pdf',exact:true}).getAttribute('download'),'Receipt103.pdf');
+   await documents.getByRole('button',{name:'Receipt195.png',exact:true}).waitFor();
+   assert.equal(await documents.getByRole('link',{name:'Invoice195.pdf',exact:true}).getAttribute('download'),'Invoice195.pdf');
+  }
+  await paid.getByRole('button',{name:'Документы, 3',exact:true}).click();
+  await checkDocuments();await documents.getByRole('button',{name:'Закрыть',exact:true}).click();
   await page.setViewportSize({width:390,height:844});
-  const card=page.getByRole('article').filter({hasText:'Invoice195.pdf'});assert.equal(await card.count(),1);
-  for(const name of ['Receipt103.pdf','Receipt195.png','Invoice195.pdf'])assert.ok((await card.innerText()).includes(name));
-  await card.getByText('Приход на склад · Петля',{exact:true}).click();const detail=page.getByRole('dialog',{name:'Расход',exact:true});await detail.waitFor();
+  const card=page.getByRole('article',{name:'Открыть расход · Приход на склад',exact:true});
+  assert.equal(await page.getByRole('article').count(),1);
+  await card.getByRole('button',{name:'Документы, 3',exact:true}).click();
+  await checkDocuments();await documents.getByRole('button',{name:'Закрыть',exact:true}).click();
+  await card.getByText('Приход на склад',{exact:true}).click();const detail=page.getByRole('dialog',{name:'Расход',exact:true});await detail.waitFor();
+  await detail.getByText('Петля',{exact:true}).waitFor();
   assert.equal(await detail.locator('input[type=file]').count(),0);assert.equal(await detail.getByRole('button',{name:'Удалить',exact:true}).isDisabled(),true);
   for(const name of ['Receipt103.pdf','Receipt195.png','Invoice195.pdf'])assert.ok((await detail.innerText()).includes(name));
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
@@ -186,5 +203,5 @@ test('expense search, desktop/mobile detail and image viewer expose all three re
   await detail.getByRole('button',{name:'Receipt195.png',exact:true}).click();
   const viewer=page.getByRole('dialog',{name:'Полноэкранный просмотр изображения',exact:true});await viewer.waitFor();
   assert.equal(await viewer.getByRole('img',{name:'Receipt195.png',exact:true}).getAttribute('src'),'/api/finance/documents/report2');
- });
+ },[paidRow,{...paidRow,id:'other',comment:'Прочий расход',stockPurchase:null,reportDocument:null,reportDocuments:[]}]);
 });

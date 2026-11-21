@@ -12,6 +12,7 @@ const require = createRequire(path.join(web, "package.json"));
 const fixture = `
 import React, { useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
+import { Toaster } from "sonner";
 import { OrganizationExpenseResults } from "@/components/organization-expense-results";
 import { ListParamsProvider } from "@/lib/list-params";
 import { resolveListState } from "@/lib/list-state";
@@ -20,7 +21,10 @@ import { parseListFilterValue } from "@/lib/list-filter-values";
 const rows = Array.from({ length: 101 }, (_, index) => ({
   id: "payment-real-id-" + String(index + 1), direction: "EXPENSE", paidAt: "2026-11-20T10:00:00.000Z",
   amount: 10, bynAmount: 10, rate: 1, rateDate: null, currency: "BYN", project: index === 1 ? { id: "source", number: "402", title: "Проект чека", archived: false } : null,
-  canPostExpenseReceipt: index === 1, reportDocuments: [], lastActionId: "fixture-head", hasActiveExpenseReceipt: index === 3,
+  canPostExpenseReceipt: index === 1, reportDocuments: index ? [] : [
+    { id: "first", fileName: "Длинное-имя-отчётного-документа-по-материалам.pdf", mimeType: "application/pdf", source: "finance" },
+    { id: "second", fileName: "Второй чек.jpg", mimeType: "image/jpeg", source: "finance" },
+  ], lastActionId: "fixture-head", hasActiveExpenseReceipt: index === 3,
   receiptLines: index === 3 ? [{ movementId:"source-line", materialId:"oak", materialName:"Дуб", quantity:"10", unit:"шт.", amount:"10.00", unitPrice:"1", stockValueByn:"10.00" }] : [],
   cashAccountName: ["Касса А", "Касса Б", "Касса В"][index % 3], expenseArticleName: index % 2 ? "Материалы" : "Прочее",
   comment: "fixture", cash: ["a", "b", "c"][index % 3], article: index % 2 ? "materials" : "other",
@@ -42,12 +46,13 @@ function App() {
   return <main className="mx-auto max-w-[1480px] p-4">
     <ListParamsProvider section="organizationExpenses" initialQuery={query} preference={saved}>
       <OrganizationExpenseResults rows={shown} options={options} page={page} pageSize={pageSize} total={selection.length}
-        totalByn={(selection.length * 10).toFixed(2)} sort="date" dir="desc" cashAccounts={[]} canAssignProject
+        totalByn={(selection.length * 10).toFixed(2)} sort={params.get("sort") || "date"} dir={params.get("dir") || "desc"} cashAccounts={[]} canAssignProject
         projects={[{ id: "source", number: "402", title: "Проект чека", currency: "BYN" },
           { id: "project-124", number: "124", title: "Действующий проект", currency: "BYN" },
           { id: "other-currency", number: "125", title: "Архивный курс", currency: "EUR" }]}
         stockMaterials={[{ id: "oak", name: "Дуб", unit: "шт." }, { id: "mdf", name: "МДФ", unit: "м²" }]}/>
     </ListParamsProvider>
+    <Toaster/>
   </main>;
 }
 createRoot(document.getElementById("root")).render(<App/>);
@@ -57,7 +62,6 @@ const boundaries = {
   "@/server/logistics/reallocation-actions": 'export const readTripReallocation=async()=>({ok:false}); export const readTripReallocationProducts=readTripReallocation; export const previewTripReallocation=readTripReallocation; export const saveTripReallocation=readTripReallocation;',
   "next/link": 'export default function Link({ children, ...props }) { return <a {...props}>{children}</a>; }',
   "@/components/payment-dialog": "export function PaymentDialog() { return null; }",
-  "@/components/report-document-button": "export function ReportDocumentButton() { return null; }",
   "@/server/payments/project-assignment-actions": 'export async function assignOrdinaryExpenseProject(input) { window.__fixtureAssignment = input; return { ok:true, changed:true }; }',
   "@/server/warehouse/expense-issue-actions": `
     const source={movementId:"source-line",materialId:"oak",materialName:"Дуб",unit:"шт.",receiptQuantity:"10.000",issuedQuantity:"2.000",remainingQuantity:"8.000"};
@@ -109,12 +113,43 @@ test("реестр расходов в Chromium сохраняет фильтр�
     page.on("pageerror", error => errors.push(error.message));
     await page.goto(url);
     const table = page.getByRole("table");
-    await expect(table.getByRole("columnheader").first()).toHaveText("ID");
-    await expect(table.getByRole("cell", { name: "payment-real-id-1", exact: true })).toBeVisible();
+    const header = table.getByRole("columnheader");
+    await expect(header).toHaveCount(7);
+    for (const [index, title] of ["ID", "Дата", "Назначение", "Касса", "Статья", "Сумма", "Документы"].entries())
+      await expect(header.nth(index)).toContainText(title);
+    const bodyRows = table.locator("tbody tr");
+    const first = bodyRows.first();
+    const copy = first.getByRole("cell").first().getByRole("button", { name: "Скопировать ID" });
+    await expect(copy).toBeVisible();
+    await expect(first.getByRole("cell").first()).toHaveText("");
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(url).origin });
+    await copy.hover();
+    await expect(page.getByRole("tooltip")).toHaveText("payment-real-id-1");
+    await copy.click();
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), "payment-real-id-1");
+    await expect(page.getByText("ID скопирован", { exact: true }).first()).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await first.getByRole("button", { name: "Документы, 2" }).click();
+    const files = page.getByRole("dialog", { name: "Документы", exact: true });
+    await expect(files.getByText("Второй чек.jpg", { exact: true })).toBeVisible();
+    await expect(files.getByRole("link", { name: "Длинное-имя-отчётного-документа-по-материалам.pdf" })).toHaveAttribute("href", "/api/finance/documents/first");
+    await page.keyboard.press("Escape");
+    await expect(files).toHaveCount(0);
+    const amountHeading = header.nth(5).getByRole("button", { name: "Сумма" });
+    for (const dir of ["asc", "desc"]) {
+      await amountHeading.click();
+      await page.getByRole("menuitem", { name: "Эквивалент BYN", exact: true }).click();
+      await expect.poll(() => {
+        const params = new URL(page.url()).searchParams;
+        return [params.get("sort"), params.get("dir")];
+      }).toEqual(["byn", dir]);
+    }
     await page.getByRole("combobox").click();
     await expect(page.getByRole("option").last()).toHaveText("Все");
     await page.getByRole("option", { name: "Все", exact: true }).click();
-    await expect(table.getByRole("cell", { name: "payment-real-id-101", exact: true })).toBeVisible();
+    await expect(bodyRows).toHaveCount(101);
+    await bodyRows.last().getByRole("button", { name: "Скопировать ID" }).click();
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), "payment-real-id-101");
     await expect(page.getByRole("button", { name: "Вперёд", exact: true })).toHaveCount(0);
     await expect(page.locator("[aria-live=polite]").filter({ hasText: "Итого по выборке" })).toHaveText(/1\s?010[,.]00 BYN/);
     await page.getByRole("combobox").click();
@@ -122,21 +157,44 @@ test("реестр расходов в Chromium сохраняет фильтр�
     await expect(page.getByText("Стр. 1 из 2", { exact: true })).toBeVisible();
     assert.equal(new URL(page.url()).searchParams.has("page"), false);
 
-    await page.getByRole("form", { name: "Фильтры расходов" }).getByRole("button", { name: "Касса", exact: true }).click();
+    const toolbar = page.getByRole("group", { name: "Фильтры расходов", exact: true });
+    const primary = ["Дата", "Назначение", "Касса", "Статья", "Сумма"];
+    for (const width of [1440, 768, 390, 360, 320]) {
+      await page.setViewportSize({ width, height: 844 });
+      const controls = [toolbar.getByRole("textbox", { name: "Поиск по расходам" }),
+        ...primary.map(name => toolbar.getByRole("button", { name, exact: true }))];
+      const boxes = await Promise.all(controls.map(control => control.boundingBox()));
+      assert.ok(boxes.every(box => box && box.width > 24 && box.x >= 0 && box.x + box.width <= width + 1));
+      boxes.slice(1).forEach((box, index) => {
+        assert.ok(box.x >= boxes[index].x + boxes[index].width - 1);
+        assert.ok(Math.abs(box.y + box.height / 2 - boxes[0].y - boxes[0].height / 2) < 2);
+      });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await toolbar.getByRole("button", { name: "Дата", exact: true }).click();
+    const dates = page.getByRole("dialog", { name: "Дата", exact: true });
+    for (const name of ["От", "До"]) {
+      const calendar = dates.getByRole("group", { name, exact: true });
+      await expect(calendar).toBeVisible();
+      await calendar.locator("[data-date]").first().click();
+    }
+    await dates.getByRole("button", { name: "Применить" }).click();
+    await expect.poll(() => new URL(page.url()).searchParams.has("dateTo")).toBe(true);
+    await toolbar.getByRole("button", { name: "Касса", exact: true }).click();
     await page.getByRole("checkbox", { name: "Касса А" }).check();
     await page.getByRole("checkbox", { name: "Касса Б" }).check();
     await page.keyboard.press("Escape");
-    await page.getByRole("form", { name: "Фильтры расходов" }).getByRole("button", { name: "Статья", exact: true }).click();
+    await toolbar.getByRole("button", { name: "Статья", exact: true }).click();
     await page.getByRole("checkbox", { name: "Материалы" }).check();
     await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "Применить", exact: true }).click();
-    await expect(page.getByText("34 записей", { exact: false })).toBeVisible();
+    await expect(page.getByText("34 расхода", { exact: true })).toBeVisible();
     await page.goto(url);
-    await expect(page.getByText("34 записей", { exact: false })).toBeVisible();
+    await expect(page.getByText("34 расхода", { exact: true })).toBeVisible();
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await expect(page.getByText("ID payment-real-id-2", { exact: true })).toBeVisible();
-    await page.getByText("ID payment-real-id-2", { exact: true }).click();
+    const projectCard = page.getByRole("article", { name: "Открыть расход · 402 · Проект чека" });
+    await projectCard.focus();
+    await page.keyboard.press("Enter");
     await expect(page.getByRole("dialog").getByText("payment-real-id-2", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Изменить проект", exact: true }).click();
     const assignment = page.getByRole("dialog", { name: "Изменить проект расхода" });
@@ -149,7 +207,8 @@ test("реестр расходов в Chromium сохраняет фильтр�
     assert.deepEqual(await page.evaluate(() => window.__fixtureAssignment), {
       paymentId: "payment-real-id-2", expectedProjectId: "source", expectedHead: "fixture-head", projectId: "project-124",
     });
-    await page.getByText("ID payment-real-id-2", { exact: true }).click();
+    await projectCard.focus();
+    await page.keyboard.press("Enter");
     await page.getByRole("button", { name: "Оприходовать на склад" }).click();
     const dialog = page.getByRole("dialog", { name: "Оприходовать на склад" });
     await expect(dialog).toBeVisible();
@@ -173,7 +232,8 @@ test("реестр расходов в Chromium сохраняет фильтр�
       { materialId: "oak", quantity: "2", amount: "4" },
       { materialId: "mdf", quantity: "2", amount: "6" },
     ]);
-    await page.getByText("ID payment-real-id-4", { exact: true }).click();
+    await page.getByRole("article", { name: "Открыть расход · Приход на склад" }).focus();
+    await page.keyboard.press("Enter");
     await expect(page.getByRole("dialog").getByText("payment-real-id-4", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Назначить на проект", exact: true })).toHaveCount(0);
     await page.getByRole("button", { name: "Выдать на изделие", exact: true }).click();

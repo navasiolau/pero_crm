@@ -1,4 +1,4 @@
-const CURRENCY_SYMBOLS: Record<string, string> = {
+export const CURRENCY_SYMBOLS: Record<string, string> = {
   BYN: "BYN", // по требованию владельца — код ISO, а не «руб.»
   RUB: "₽",
   USD: "$",

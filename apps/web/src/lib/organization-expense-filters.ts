@@ -1,7 +1,7 @@
 import { encodeListFilterValue, parseListFilterValue } from "./list-filter-values";
 
 export const expenseChoiceFields = {
-  purpose: "Проект / назначение",
+  purpose: "Назначение",
   cash: "Касса",
   article: "Статья",
   currency: "Валюта",
@@ -30,6 +30,12 @@ export const expenseRangeFields = {
 
 export const expenseSortFields = ["id", "date", "cash", "article", "amount", "byn"] as const;
 
+export function isExpenseIsoDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || value < "0001-01-01") return false;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
 export function normalizeExpenseFilters(source: URLSearchParams, result: URLSearchParams) {
   for (const key of Object.keys(expenseChoiceFields)) {
     const encoded = encodeListFilterValue(parseListFilterValue(source.get(key) ?? undefined));
@@ -43,11 +49,9 @@ export function normalizeExpenseFilters(source: URLSearchParams, result: URLSear
     for (const suffix of ["From", "To"]) {
       const key = field + suffix;
       const value = (source.get(key)?.trim() ?? "").replace(",", ".");
-      if (type === "number" && /^-?\d{1,14}(\.\d{1,6})?$/.test(value)) result.set(key, value);
-      if (type === "date" && /^\d{4}-\d{2}-\d{2}$/.test(value) && value >= "0001-01-01") {
-        const date = new Date(value);
-        if (!Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value) result.set(key, value);
-      }
+      const decimalPattern = field === "stockUnitPrice" ? /^-?\d{1,15}(\.\d{1,12})?$/ : /^-?\d{1,14}(\.\d{1,6})?$/;
+      if (type === "number" && decimalPattern.test(value)) result.set(key, value);
+      if (type === "date" && isExpenseIsoDate(value)) result.set(key, value);
     }
   }
 }
