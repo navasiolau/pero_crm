@@ -129,18 +129,45 @@ test("реестр расходов в Chromium сохраняет фильтр�
       await expect(detail.getByText("payment-real-id-1", { exact: true })).toBeVisible();
       await expect(detail.getByText(/Конец комментария\.$/)).toBeVisible();
     };
+    const measureDetail = () => detail.evaluate(async dialog => {
+      await new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)));
+      await Promise.all(dialog.getAnimations().map(animation => animation.finished.catch(() => {})));
+      const { left, top, right, bottom, width } = dialog.getBoundingClientRect();
+      const full = left >= -2 && left <= 2 && top >= -2 && top <= 2 &&
+        Math.abs(right - window.innerWidth) <= 2 && Math.abs(bottom - window.innerHeight) <= 2;
+      const details = dialog.querySelector("dl");
+      const noHorizontalScroll = dialog.scrollWidth <= dialog.clientWidth + 1 &&
+        details.scrollWidth <= details.clientWidth + 1 && document.documentElement.scrollWidth <= window.innerWidth + 1;
+      return { width, full, noHorizontalScroll };
+    });
+    const expand = detail.getByRole("button", { name: "Развернуть на весь экран", exact: true });
+    const restore = detail.getByRole("button", { name: "Вернуть размер", exact: true });
     await openGeneralExpense();
+    const initialWidth = (await measureDetail()).width;
+    assert.ok(initialWidth >= 1088 && initialWidth <= 1152, `Ширина открытого расхода при 1440 px: ${initialWidth}px`);
+    await expand.click();
+    assert.ok((await measureDetail()).full, "Кнопка разворачивает расход на весь доступный экран");
+    await restore.click();
+    assert.ok(Math.abs((await measureDetail()).width - initialWidth) <= 1, "Возвращается исходная ширина расхода");
+    await expand.click();
+    await detailButton("Закрыть").click();
+    await expect(detail).toHaveCount(0);
+    await openGeneralExpense();
+    await expect(expand).toBeVisible();
+    assert.ok(Math.abs((await measureDetail()).width - initialWidth) <= 1, "Повторное открытие возвращает широкий режим");
+
     const clipped = [];
-    for (const [width, height] of [[320, 420], [320, 740], [390, 844], [640, 800], [768, 900], [1366, 768]]) {
+    for (const [width, height] of [[320, 420], [320, 740], [390, 844], [640, 800], [768, 900], [1024, 768], [1366, 768], [1920, 1080]]) {
       await page.setViewportSize({ width, height });
-      await detail.evaluate(async dialog => {
-        await new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)));
-        await Promise.all(dialog.getAnimations().map(animation => animation.finished.catch(() => {})));
-      });
+      const box = await measureDetail();
+      if (width <= 390) assert.ok(box.full && box.noHorizontalScroll, `Полнокадровый расход при ${width}×${height}`);
+      if (width >= 1024) assert.ok(box.width >= (width >= 1366 ? 1088 : 960) && box.width <= 1152,
+        `Ширина открытого расхода при ${width} px: ${box.width}px`);
+      const rowPositions = [];
       for (const name of ["Назначить на проект", "Оприходовать на склад", "Закрыть", "Удалить"]) {
         const button = detailButton(name);
         await expect(button).toBeEnabled();
-        const visible = await button.evaluate(element => {
+        const action = await button.evaluate(element => {
           const dialog = element.closest("[data-slot=dialog-content]");
           const frame = dialog.getBoundingClientRect(), button = element.getBoundingClientRect();
           const text = document.createRange();
@@ -155,27 +182,39 @@ test("реестр расходов в Chromium сохраняет фильтр�
           const x = button.left + button.width / 2, y = button.top + button.height / 2;
           const hitsButton = [[x, y], [button.left + 2, y], [button.right - 2, y], [x, button.top + 2], [x, button.bottom - 2]]
             .every(([px, py]) => element.contains(document.elementFromPoint(px, py)));
-          return inside(button, { left, top, right, bottom }) && label.length > 0 &&
+          const visible = inside(button, { left, top, right, bottom }) && label.length > 0 &&
             label.every(rect => inside(rect, button)) && hitsButton;
+          return { visible, row: y, height: button.height, extraWidth: button.width - text.getBoundingClientRect().width };
         });
-        if (!visible) clipped.push(`${width}×${height} · ${name}`);
+        if (!action.visible) clipped.push(`${width}×${height} · ${name}`);
+        if (width >= 1024) assert.ok(action.height >= 28 && action.height <= 34 && action.extraWidth >= 8 && action.extraWidth <= 42,
+          `Компактная кнопка «${name}» при ${width} px · ${action.height}px, отступы ${action.extraWidth}px`);
+        rowPositions.push(action.row);
       }
+      const rowSpread = Math.max(...rowPositions) - Math.min(...rowPositions);
+      if (width >= 1024) assert.ok(rowSpread <= 2, `Действия в одной строке при ${width} px`);
+      if (width === 320) assert.ok(rowSpread > 2, "На узком телефоне кнопки переносятся");
     }
     assert.deepEqual(clipped, [], "Кнопки расхода и их подписи должны быть видны целиком");
-    await page.setViewportSize({ width: 320, height: 844 });
-    const closeButton = await detailButton("Закрыть").boundingBox();
-    const receiptButton = await detailButton("Оприходовать на склад").boundingBox();
-    assert.ok(receiptButton.y + receiptButton.height <= closeButton.y);
+    const touch = await page.context().newCDPSession(page);
+    await touch.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+    await page.setViewportSize({ width: 844, height: 390 });
+    assert.ok((await measureDetail()).full, "После поворота телефона карточка занимает весь экран");
+    await expect(expand).toBeHidden();
+    await touch.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+    await touch.detach();
+    await page.setViewportSize({ width: 320, height: 420 });
+    await measureDetail();
     const commentEndReached = await detail.getByText(/Конец комментария\.$/).evaluate(comment => {
       const details = comment.closest("dl");
       const footer = details.parentElement.querySelector("[data-slot=dialog-footer]");
       const footerTop = footer.getBoundingClientRect().top;
-      details.scrollTop = details.scrollHeight;
       const frame = details.getBoundingClientRect();
       const range = document.createRange();
       range.selectNodeContents(comment);
+      details.scrollTop += [...range.getClientRects()].at(-1).bottom - frame.bottom;
       const lastLine = [...range.getClientRects()].at(-1);
-      return details.scrollTop > 0 && lastLine.top >= frame.top && lastLine.bottom <= frame.bottom &&
+      return details.scrollTop > 0 && lastLine.top >= frame.top - 1 && lastLine.bottom <= frame.bottom + 1 &&
         footer.getBoundingClientRect().top === footerTop;
     });
     assert.ok(commentEndReached, "На телефоне конец комментария доступен при прокрутке, а действия остаются на месте");
