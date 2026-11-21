@@ -285,3 +285,16 @@
     max-width: 100%;
   }
 }
+
+/* После поворота экран телефона может быть шире 768 px. */
+@media (width < 768px), (pointer: coarse) and (height <= 500px) {
+  [data-slot="dialog-content"][data-mobile-fullscreen] {
+    width: 100%;
+    max-width: none;
+    height: var(--dialog-viewport-height, 100dvh);
+    max-height: none;
+    overflow: hidden;
+    border-radius: 0;
+  }
+  [data-mobile-fullscreen] [data-dialog-size-toggle] { display: none; }
+}
