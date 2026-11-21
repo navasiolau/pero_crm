@@ -21,6 +21,11 @@ function App(){
  return window.__mode==='catalog'?<MaterialUnitsView rows={units}/>:<ItemsView rows={materials} categories={[]} units={units} canManage={true} showMoney={true}/>;
 }createRoot(document.getElementById('root')).render(<App/>);
 `,resolveDir:web,loader:"tsx"},bundle:true,write:false,platform:"browser",format:"iife",jsx:"automatic",tsconfig:path.join(web,"tsconfig.json"),define:{"process.env.NODE_ENV":'"production"'},plugins:[{name:"server-boundaries",setup(b){
+ b.onResolve({filter:/^next\/link$/},args=>({path:args.path,namespace:"link"}));
+ b.onLoad({filter:/.*/,namespace:"link"},()=>({
+  contents:'export default function Link({ children, replace, onNavigate, ...props }) { return <a {...props}>{children}</a>; }',
+  loader:"jsx",resolveDir:web,
+ }));
  b.onResolve({filter:/^(next\/navigation|sonner|@\/server\/warehouse\/(unit-actions|actions))$/},args=>({path:args.path,namespace:"qa"}));
  b.onLoad({filter:/.*/,namespace:"qa"},args=>({loader:"js",contents:args.path==="next/navigation"?'export const useRouter=()=>({refresh(){}});':args.path==="sonner"?'export const toast={success(){},error(message){window.__errors.push(message)}};':args.path.endsWith("unit-actions")?`
  export async function addMaterialUnit(input){window.__catalog.push({kind:'add',input});return{ok:true}};
