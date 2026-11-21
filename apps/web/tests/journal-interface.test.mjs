@@ -18,7 +18,9 @@ import React from 'react';
 import {createRoot} from 'react-dom/client';
 import {Journal} from '@/components/journal/journal';
 window.__qa = {lists:[],details:[],options:[],heldLists:[],heldDetails:[],holdDetail:false,failDetail:false,previews:[],reversals:[]};
-createRoot(document.getElementById('root')).render(<main style={{padding:16}}><Journal scope={{kind:'global'}}/></main>);
+const embedded = new URLSearchParams(location.search).get('scope') === 'project';
+const scope = embedded ? {kind:'project',id:'project-stable'} : {kind:'global'};
+createRoot(document.getElementById('root')).render(<main style={{padding:16}}><Journal scope={scope}/></main>);
 `;
 const transport = `
 const rows = [
@@ -62,6 +64,94 @@ async function bundle() {
   return { js: built.outputFiles[0].contents, css };
 }
 
+async function selectorGeometry(trigger, mobile) {
+  return trigger.evaluate(async (node, mobile) => {
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const journal = node.closest("[data-journal]");
+    const form = node.closest("form");
+    await Promise.allSettled(form.getAnimations({ subtree: true }).map(animation => animation.finished));
+    const rect = element => {
+      const { x, y, width, height } = element.getBoundingClientRect();
+      return { x, y, width, height };
+    };
+    const firstEntry = journal.querySelector(mobile ? '[data-slot="mobile-list-card"]' : "tbody tr");
+    return {
+      form: rect(form),
+      trigger: rect(node),
+      firstEntry: rect(firstEntry),
+      scroll: { x: scrollX, y: scrollY },
+    };
+  }, mobile);
+}
+
+async function checkSelectorLayout(page, expect) {
+  const cases = [
+    { label: "Пользователь", search: "Поиск пользователя…", query: "Архивный", option: "Архивный сотрудник", other: "Иван Петров" },
+    { label: "Сущность", search: "Поиск сущности…", query: "Издел", option: "Изделия", other: "Проекты" },
+  ];
+  // Playwright может прокрутить страницу к цели locator.click() во время анимации списка.
+  async function clickInViewport(locator) {
+    await expect(locator).toBeInViewport({ ratio: 1 });
+    const { x, y, width, height } = await locator.boundingBox();
+    await page.mouse.click(x + width / 2, y + height / 2);
+  }
+  const origin = new URL(page.url()).origin;
+  for (const [scope, width] of [["global", 1440], ["project", 390]]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto(`${origin}/?scope=${scope}`);
+    const mobile = width < 640;
+    await expect(page.locator(mobile ? '[data-slot="mobile-list-card"]' : "tbody tr").first()).toBeVisible();
+    await page.locator("main").evaluate(node => {
+      node.style.marginTop = "240px";
+      node.style.minHeight = "150vh";
+    });
+    const outside = page.getByLabel("Поиск по журналу", { exact: true });
+    for (const { label, search, query, option, other } of cases) {
+      const trigger = page.getByLabel(label, { exact: true });
+      const input = page.getByPlaceholder(search, { exact: true });
+      const item = page.getByRole("button", { name: option, exact: true });
+      const otherItem = page.getByRole("button", { name: other, exact: true });
+      await expect(trigger).toBeEnabled();
+      await page.evaluate(() => window.scrollTo(0, 160));
+      await expect(trigger).toBeInViewport({ ratio: 1 });
+      const closed = await selectorGeometry(trigger, mobile);
+      assert.ok(closed.scroll.y > 0, "journal fixture must start scrolled");
+      async function checkGeometry(phase) {
+        assert.deepEqual(await selectorGeometry(trigger, mobile), closed, `${scope}/${width} ${label} ${phase}`);
+      }
+
+      await trigger.click();
+      await expect(input).toBeFocused();
+      await expect(input).toBeInViewport({ ratio: 1 });
+      await expect(item).toBeInViewport({ ratio: 1 });
+      await checkGeometry("открытие");
+
+      await input.fill(query);
+      await expect(item).toBeInViewport({ ratio: 1 });
+      await expect(otherItem).toHaveCount(0);
+      await checkGeometry("поиск");
+      await page.keyboard.press("Escape");
+      await expect(input).toBeHidden();
+      await expect(trigger).toBeFocused();
+      await checkGeometry("Escape");
+
+      await trigger.click();
+      await expect(input).toHaveValue("");
+      await clickInViewport(outside);
+      await expect(input).toBeHidden();
+      await checkGeometry("клик снаружи");
+
+      await trigger.click();
+      await clickInViewport(item);
+      await expect(input).toBeHidden();
+      await expect(trigger).toHaveText(option);
+      await checkGeometry("выбор");
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${origin}/`);
+}
+
 test("journal opens one complete event, preserves focus, filters on server and rejects late responses", { timeout: 120000 }, async () => {
   const { js, css } = await bundle();
   let server, browser;
@@ -88,6 +178,8 @@ test("journal opens one complete event, preserves focus, filters on server and r
       console.log({ errors, initialFixture: await page.evaluate(() => ({ body: document.body.innerText.slice(0, 2000), lists: window.__qa?.lists })) });
       throw error;
     }
+    await checkSelectorLayout(page, expect);
+    await expect(row).toBeVisible();
     for (const { width, sidebar } of [
       { width: 1440, sidebar: 256 }, { width: 1440, sidebar: 48 },
       { width: 1280, sidebar: 256 }, { width: 1280, sidebar: 48 },
