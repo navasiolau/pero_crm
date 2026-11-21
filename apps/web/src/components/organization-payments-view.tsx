@@ -13,6 +13,7 @@ import { PaymentDialog } from "@/components/payment-dialog";
 import { ReportDocumentButton } from "@/components/report-document-button";
 import { formatAmount, formatDate, formatQty, formatMoneyTotal } from "@/lib/format";
 import { INTERNAL_CURRENCY } from "@/lib/internal-currency";
+import { cn } from "@/lib/utils";
 import type { StockMaterialOption } from "@/server/warehouse/contracts";
 import type { MaterialCreateOptions } from "@/server/warehouse/material-contracts";
 import { deletePayment } from "@/server/payments/actions";
@@ -32,10 +33,19 @@ export function OrganizationPaymentsView({ direction, rows, cashAccounts, projec
   const income = direction === "INCOME", noun = income ? "приход" : "расход";
   const title = income ? "Приходы организации" : "Расходы организации";
   const general = income ? "Общий приход организации" : "Общий расход организации";
+  const mobileDetailBlock = income ? undefined : "max-sm:col-span-full max-sm:-mt-2";
   const [open, setOpen] = useState(false), [viewing, setViewing] = useState<OrganizationPaymentRow | null>(null);
   const [purchaseOpen, setPurchaseOpen] = useState(false);
   const detailHeading = useRef<HTMLHeadingElement>(null);
   const [deleting, setDeleting] = useState<OrganizationPaymentRow | null>(null), router = useRouter();
+  const closeDetailButton = <Button variant="outline" onClick={() => setViewing(null)}>Закрыть</Button>;
+  const deleteDetailButton = (
+    <Button variant="destructive"
+      disabled={viewing?.project?.archived || Boolean(viewing?.stockPurchase || viewing?.receiptLines?.length || viewing?.logisticsTripId)}
+      onClick={() => { setDeleting(viewing); setViewing(null); }}>
+      Удалить
+    </Button>
+  );
   const incomeColumns: DataColumn<OrganizationPaymentRow>[] = [
     { id: "date", header: "Дата", sortable: true, sortValue: row => row.paidAt, cell: row => formatDate(row.paidAt) },
     { id: "project", header: "Проект / назначение", searchValue: row => (row.stockPurchase || row.receiptLines?.length) ? `Приход на склад ${row.receiptLines?.map(line => line.materialName).join(" ") || row.stockPurchase?.materialName}` : row.project ? `${row.project.number} ${row.project.title}` : general,
@@ -63,15 +73,20 @@ export function OrganizationPaymentsView({ direction, rows, cashAccounts, projec
     <PaymentDialog direction={direction} open={open} onOpenChange={setOpen} projectCurrency="BYN" projectOptions={projects} cashAccounts={cashAccounts} expenseArticles={expenseArticles} />
     {stockMaterials ? <PaymentDialog direction="EXPENSE" open={purchaseOpen} onOpenChange={setPurchaseOpen} projectCurrency="BYN" stockMaterials={stockMaterials} cashAccounts={cashAccounts} expenseArticles={expenseArticles} materialCreateOptions={materialCreateOptions} /> : null}
     <Dialog open={viewing !== null} onOpenChange={next => { if (!next) setViewing(null); }}>
-      <DialogContent initialFocus={detailHeading}><DialogHeader><DialogTitle ref={detailHeading} tabIndex={-1} className="outline-none">{income ? "Приход" : "Расход"}</DialogTitle><DialogDescription>{(viewing?.stockPurchase || viewing?.receiptLines?.length) ? "Оплаченный приход материалов" : viewing && !income ? organizationExpensePurpose(viewing) : viewing?.project ? `${viewing.project.number} · ${viewing.project.title}` : general}</DialogDescription></DialogHeader>
-        {viewing ? <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-3 text-sm">
+      <DialogContent initialFocus={detailHeading} className={income ? undefined : "grid-rows-[auto_minmax(0,1fr)_auto]"}>
+        <DialogHeader className={income ? undefined : "pr-8 [overflow-wrap:anywhere]"}>
+          <DialogTitle ref={detailHeading} tabIndex={-1} className="outline-none">{income ? "Приход" : "Расход"}</DialogTitle>
+          <DialogDescription>{(viewing?.stockPurchase || viewing?.receiptLines?.length) ? "Оплаченный приход материалов" : viewing && !income ? organizationExpensePurpose(viewing) : viewing?.project ? `${viewing.project.number} · ${viewing.project.title}` : general}</DialogDescription>
+        </DialogHeader>
+        {viewing ? <dl className={cn("grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-3 text-sm",
+          !income && "min-h-0 overflow-y-auto overscroll-contain [overflow-wrap:anywhere] [&>dt]:text-muted-foreground")}>
           {!income && <><dt>ID</dt><dd className="select-text break-all font-mono text-xs">{viewing.id}</dd></>}
           <dt>Дата</dt><dd>{formatDate(viewing.paidAt)}</dd><dt>Сумма</dt><dd>{formatAmount(viewing.amount, viewing.currency)}</dd>
           {(income || viewing.currency !== INTERNAL_CURRENCY) && <><dt>Эквивалент BYN</dt><dd>{formatAmount(viewing.bynAmount, INTERNAL_CURRENCY)}</dd></>}
           {!income && <><dt>Курс / дата</dt><dd>{viewing.rate} / {viewing.rateDate ? formatDate(viewing.rateDate) : "—"}</dd></>}
           <dt>Касса</dt><dd>{viewing.cashAccountName ?? "—"}</dd>
           {!income ? <><dt>Статья</dt><dd>{viewing.expenseArticleName ?? "—"}</dd></> : null}
-          <dt>Комментарий</dt><dd className="whitespace-pre-wrap break-words">{viewing.comment ?? "—"}</dd>
+          <dt>Комментарий</dt><dd className={cn("whitespace-pre-wrap break-words", mobileDetailBlock)}>{viewing.comment ?? "—"}</dd>
           {viewing.stockPurchase ? <>
             <dt>Приход на склад</dt><dd className="break-words">{viewing.stockPurchase.materialName}</dd>
             <dt>Количество</dt><dd>{formatQty(viewing.stockPurchase.quantity)} {viewing.stockPurchase.unit}</dd>
@@ -81,19 +96,28 @@ export function OrganizationPaymentsView({ direction, rows, cashAccounts, projec
             <dd className="col-span-2 text-muted-foreground">Оплата связана с приходом на склад. Отдельно удалить её нельзя.</dd>
           </> : null}
           {!viewing.stockPurchase && viewing.receiptLines?.length ? <>
-            <dt>Приход на склад</dt><dd><ul className="space-y-2">{viewing.receiptLines.map(line =>
+            <dt>Приход на склад</dt><dd className={mobileDetailBlock}><ul className="space-y-2">{viewing.receiptLines.map(line =>
               <li key={line.movementId} className="break-words"><b>{line.materialName}</b> · {formatQty(line.quantity)} {line.unit}<br/>
                 {formatAmount(Number(line.amount), viewing.currency)} · {formatMoneyTotal(line.stockValueByn === null ? null : Number(line.stockValueByn), "BYN")}
                 <div className="text-muted-foreground">Цена единицы {line.unitPrice.replace(".", ",")} {viewing.currency} · Движение {line.movementId}</div>
               </li>)}</ul></dd>
           </> : null}
-          {(viewing.reportDocument || viewing.reportDocuments?.length) ? <><dt>{income ? "Документ" : "Документы"}</dt><dd><ReportDocumentButton document={viewing.reportDocument} documents={viewing.reportDocuments}/></dd></> : null}
+          {(viewing.reportDocument || viewing.reportDocuments?.length) ? <><dt>{income ? "Документ" : "Документы"}</dt><dd className={mobileDetailBlock}><ReportDocumentButton document={viewing.reportDocument} documents={viewing.reportDocuments}/></dd></> : null}
           {viewing.logisticsTripId ? <dd className="col-span-2 text-muted-foreground"><Link href={`/logistics/${viewing.logisticsTripId}`} className="underline">Расход относится к общему рейсу</Link>. Исправления выполняются в логистике.</dd> : null}
         </dl> : null}
-        <DialogFooter>
-          {viewing && renderDetailActions?.(viewing, () => setViewing(null))}
-          <Button variant="outline" onClick={() => setViewing(null)}>Закрыть</Button><Button variant="destructive" disabled={viewing?.project?.archived || Boolean(viewing?.stockPurchase || viewing?.receiptLines?.length) || Boolean(viewing?.logisticsTripId)}
-          onClick={() => { setDeleting(viewing); setViewing(null); }}>Удалить</Button></DialogFooter>
+        <DialogFooter className={income ? undefined : "grid grid-cols-[minmax(0,1fr)] gap-0 p-0 sm:justify-stretch"}>
+          {viewing && renderDetailActions && (
+            <div className={income ? "contents" : "grid grid-cols-[repeat(auto-fit,minmax(min(100%,12rem),1fr))] gap-2 border-b bg-popover px-4 py-3 empty:hidden [&>button]:h-auto [&>button]:min-h-9 [&>button]:whitespace-normal [&>button]:py-1.5"}>
+              {renderDetailActions(viewing, () => setViewing(null))}
+            </div>
+          )}
+          {income ? <>{closeDetailButton}{deleteDetailButton}</> : (
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+              {deleteDetailButton}
+              {closeDetailButton}
+            </div>
+          )}
+        </DialogFooter>
       </DialogContent>
     </Dialog>
     <ConfirmDeleteDialog open={deleting !== null} onOpenChange={next => { if (!next) setDeleting(null); }} entityLabel={noun}
