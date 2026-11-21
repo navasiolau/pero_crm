@@ -21,13 +21,14 @@ import { parseListFilterValue } from "@/lib/list-filter-values";
 const rows = Array.from({ length: 101 }, (_, index) => ({
   id: "payment-real-id-" + String(index + 1), direction: "EXPENSE", paidAt: "2026-11-20T10:00:00.000Z",
   amount: 10, bynAmount: 10, rate: 1, rateDate: null, currency: "BYN", project: index === 1 ? { id: "source", number: "402", title: "Проект чека", archived: false } : null,
-  canPostExpenseReceipt: index === 1, reportDocuments: index ? [] : [
+  canPostExpenseReceipt: index <= 1, reportDocuments: index ? [] : [
     { id: "first", fileName: "Длинное-имя-отчётного-документа-по-материалам.pdf", mimeType: "application/pdf", source: "finance" },
     { id: "second", fileName: "Второй чек.jpg", mimeType: "image/jpeg", source: "finance" },
   ], lastActionId: "fixture-head", hasActiveExpenseReceipt: index === 3,
   receiptLines: index === 3 ? [{ movementId:"source-line", materialId:"oak", materialName:"Дуб", quantity:"10", unit:"шт.", amount:"10.00", unitPrice:"1", stockValueByn:"10.00" }] : [],
   cashAccountName: ["Касса А", "Касса Б", "Касса В"][index % 3], expenseArticleName: index % 2 ? "Материалы" : "Прочее",
-  comment: "fixture", cash: ["a", "b", "c"][index % 3], article: index % 2 ? "materials" : "other",
+  comment: index ? "fixture" : "Длинный комментарий о закупке и расчётах с поставщиком. ".repeat(12) + "Конец комментария.",
+  cash: ["a", "b", "c"][index % 3], article: index % 2 ? "materials" : "other",
 }));
 const options = { purpose: [], cash: ["a", "b", "c"].map((value, index) => ({ value, label: rows[index].cashAccountName })),
   article: [{ value: "materials", label: "Материалы" }, { value: "other", label: "Прочее" }], currency: [{ value: "BYN", label: "BYN" }], documentPresence: [], material: [], stockUnit: [] };
@@ -119,6 +120,79 @@ test("реестр расходов в Chromium сохраняет фильтр�
       await expect(header.nth(index)).toContainText(title);
     const bodyRows = table.locator("tbody tr");
     const first = bodyRows.first();
+
+    const detail = page.getByRole("dialog", { name: "Расход", exact: true });
+    const detailFooter = detail.locator("[data-slot=dialog-footer]");
+    const detailButton = name => detailFooter.getByRole("button", { name, exact: true });
+    const openGeneralExpense = async () => {
+      await first.click();
+      await expect(detail.getByText("payment-real-id-1", { exact: true })).toBeVisible();
+      await expect(detail.getByText(/Конец комментария\.$/)).toBeVisible();
+    };
+    await openGeneralExpense();
+    const clipped = [];
+    for (const width of [320, 390, 640, 768, 1366]) {
+      await page.setViewportSize({ width, height: 844 });
+      for (const name of ["Назначить на проект", "Оприходовать на склад", "Закрыть", "Удалить"]) {
+        const button = detailButton(name);
+        await expect(button).toBeEnabled();
+        await button.scrollIntoViewIfNeeded();
+        const visible = await button.evaluate(element => {
+          const dialog = element.closest("[data-slot=dialog-content]");
+          const frame = dialog.getBoundingClientRect(), button = element.getBoundingClientRect();
+          const text = document.createRange();
+          text.selectNodeContents(element);
+          const left = Math.max(0, frame.left + dialog.clientLeft);
+          const top = Math.max(0, frame.top + dialog.clientTop);
+          const right = Math.min(window.innerWidth, frame.left + dialog.clientLeft + dialog.clientWidth);
+          const bottom = Math.min(window.innerHeight, frame.top + dialog.clientTop + dialog.clientHeight);
+          const inside = (rect, outer) => rect.left >= outer.left - 1 && rect.right <= outer.right + 1 &&
+            rect.top >= outer.top - 1 && rect.bottom <= outer.bottom + 1;
+          const label = [...text.getClientRects()].filter(rect => rect.width > 0);
+          const hitsButton = [button.left + 2, button.left + button.width / 2, button.right - 2].every(x =>
+            element.contains(document.elementFromPoint(x, button.top + button.height / 2)));
+          return inside(button, { left, top, right, bottom }) && label.length > 0 &&
+            label.every(rect => inside(rect, button)) && hitsButton;
+        });
+        if (!visible) clipped.push(`${width}px · ${name}`);
+      }
+    }
+    assert.deepEqual(clipped, [], "Кнопки расхода и их подписи должны быть видны целиком");
+    await page.setViewportSize({ width: 320, height: 844 });
+    const closeButton = await detailButton("Закрыть").boundingBox();
+    const receiptButton = await detailButton("Оприходовать на склад").boundingBox();
+    assert.ok(receiptButton.y + receiptButton.height <= closeButton.y);
+    const commentEndReached = await detail.getByText(/Конец комментария\.$/).evaluate(comment => {
+      const details = comment.closest("dl");
+      const footer = details.parentElement.querySelector("[data-slot=dialog-footer]");
+      const footerTop = footer.getBoundingClientRect().top;
+      details.scrollTop = details.scrollHeight;
+      const frame = details.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(comment);
+      const lastLine = [...range.getClientRects()].at(-1);
+      return details.scrollTop > 0 && lastLine.top >= frame.top && lastLine.bottom <= frame.bottom &&
+        footer.getBoundingClientRect().top === footerTop;
+    });
+    assert.ok(commentEndReached, "На телефоне конец комментария доступен при прокрутке, а действия остаются на месте");
+
+    await page.setViewportSize({ width: 640, height: 844 });
+    await detailButton("Назначить на проект").click();
+    const newAssignment = page.getByRole("dialog", { name: "Назначить расход на проект", exact: true });
+    await newAssignment.getByRole("button", { name: "Отмена", exact: true }).click();
+    await detailButton("Оприходовать на склад").click();
+    const newReceipt = page.getByRole("dialog", { name: "Оприходовать на склад", exact: true });
+    await expect(newReceipt.getByRole("button", { name: "Предпросмотр", exact: true })).toBeDisabled();
+    await newReceipt.locator("[data-slot=dialog-footer]").getByRole("button", { name: "Закрыть", exact: true }).click();
+    await detailButton("Удалить").click();
+    const deleteConfirmation = page.getByRole("dialog", { name: "Подтверждение удаления", exact: true });
+    await deleteConfirmation.getByRole("button", { name: "Отмена", exact: true }).click();
+    assert.ok(await page.evaluate(() => !window.__fixtureAssignment && !window.appliedReceipt));
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openGeneralExpense();
+    await detailButton("Закрыть").click();
+    await expect(detail).toHaveCount(0);
+
     const copy = first.getByRole("cell").first().getByRole("button", { name: "Скопировать ID" });
     await expect(copy).toBeVisible();
     await expect(first.getByRole("cell").first()).toHaveText("");
