@@ -47,7 +47,7 @@ export function OrganizationPaymentsView({ direction, rows, cashAccounts, projec
     { id: "comment", header: "Комментарий", searchValue: row => row.comment ?? "", cell: row => row.comment ?? "—" },
     { id: "actions", header: "", cell: row => <Button variant="ghost" disabled={row.project?.archived || Boolean(row.stockPurchase || row.receiptLines?.length) || Boolean(row.logisticsTripId)} onClick={event => { event.stopPropagation(); setDeleting(row); }}>Удалить</Button> },
   ];
-  return <section className={income ? "flex min-w-0 flex-col gap-5" : "flex min-w-0 flex-col gap-3"}>
+  return <section className={income ? "flex min-w-0 flex-col gap-5" : "@container/expenses flex min-w-0 flex-col gap-3"}>
     <Link href="/finance" className="text-sm text-muted-foreground">Назад к финансам</Link>
     <div className={income ? "flex flex-wrap items-center justify-between gap-3" : "flex flex-wrap items-center justify-between gap-2"}><h1 className={income ? "text-2xl font-semibold" : "text-xl font-semibold"}>{title}</h1><div className="flex flex-wrap gap-2">{stockMaterials ? <Button variant="outline" onClick={() => setPurchaseOpen(true)}>Приход на склад</Button> : null}<Button onClick={() => setOpen(true)}>Добавить {noun}</Button></div></div>
     {income && <p className="text-sm text-muted-foreground">Общий приход без проекта входит в баланс и оборот организации; экономика отдельных проектов не меняется.</p>}
