@@ -232,16 +232,20 @@ export function ProductsTab({
   }
 
   const activeProduct = products.find((product) => product.id === activeId);
-  const productsPath = projectProductsHref(projectId);
 
   function openProduct(productId: string) {
     const source = new URL(window.location.href);
-    const tabs = source.searchParams.getAll("tab");
-    if (tabs.length !== 1 || tabs[0] !== "products") {
-      // Возврат браузера должен открыть «Изделия» даже после выбора вкладки без изменения URL.
+    const list = source.searchParams.getAll("returnTo");
+    const productsPath = projectProductsHref(projectId, list.length === 1 ? list[0] : undefined);
+    const parent = new URL(productsPath, source.origin);
+    const previousSearch = source.search;
+    // Приводим запись истории к тому же адресу, который использует стрелка.
+    if (source.pathname === parent.pathname && [...source.searchParams.keys()].every(key => key === "tab" || key === "returnTo")) {
+      source.search = parent.search;
+    } else if (source.searchParams.getAll("tab").join(",") !== "products") {
       source.searchParams.set("tab", "products");
-      window.history.replaceState(null, "", source);
     }
+    if (source.search !== previousSearch) window.history.replaceState(null, "", source);
     router.push(productDetailHref(productId, productsPath));
   }
 

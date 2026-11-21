@@ -1,13 +1,45 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { productDetailHref, projectProductsHref, globalProductsHref, resolveProductReturn, resolveProjectTab } from "../src/lib/product-return-navigation";
-import { MAX_LIST_QUERY_LENGTH } from "../src/lib/list-state";
+import { projectDetailHref, resolveProjectReturn } from "../src/lib/project-return-navigation";
+import { MAX_LIST_QUERY_LENGTH, resolveListState } from "../src/lib/list-state";
 import { navItemsForRole } from "../src/lib/nav";
 import { type Role } from "@prisma/client";
 
 // Источник: product-return-navigation.test.ts
 test('project entry opens actual parent products tab; direct entry uses same fallback',()=>{
  const parent=projectProductsHref('parent');assert.equal(parent,'/projects/parent?tab=products');const href=productDetailHref('205.1',parent);assert.equal(new URL(href,'https://crm.invalid').searchParams.get('returnTo'),parent);assert.deepEqual(resolveProductReturn(parent,'parent'),{href:parent,label:'Назад к изделиям проекта'});assert.equal(resolveProductReturn(undefined,'parent').href,parent);
+});
+test('nested project return keeps the filtered list across tabs without browser history or saved preferences', () => {
+  for (const view of ['table', 'kanban']) {
+    const query = new URLSearchParams({ view, q: 'Кухня + шкаф', stage: '["IN_WORK"]', sort: 'number', dir: 'asc', page: '3', pageSize: '50' });
+    const project = new URL(projectDetailHref('parent', query.toString()), 'https://crm.invalid');
+    const list = resolveProjectReturn(project.searchParams.get('returnTo'));
+    assert.notEqual(list, '/projects');
+    const product = new URL(productDetailHref('205.1', projectProductsHref('parent', list)), project);
+    const back = resolveProductReturn(product.searchParams.get('returnTo'), 'parent');
+    assert.equal(back.label, 'Назад к изделиям проекта');
+    const parent = new URL(back.href, 'https://crm.invalid');
+    assert.equal(parent.pathname, project.pathname);
+    assert.equal(parent.searchParams.get('tab'), 'products');
+    const returned = new URL(resolveProjectReturn(parent.searchParams.get('returnTo')), 'https://crm.invalid');
+    assert.equal(returned.pathname + returned.search, list);
+    const otherTabPreferences = 'view=kanban&q=changed-in-another-tab';
+    assert.equal(resolveListState('projects', Object.fromEntries(returned.searchParams), otherTabPreferences), returned.search.slice(1));
+  }
+});
+test('nested return accepts only the real project and a canonical projects list', () => {
+  const parent = projectProductsHref('parent');
+  const list = '/projects?view=table&q=project+name';
+  const nested = projectProductsHref('parent', list);
+  assert.equal(resolveProductReturn(nested, 'parent').href, nested);
+  assert.equal(resolveProductReturn(projectProductsHref('other', list), 'parent').href, parent);
+  assert.equal(resolveProductReturn(`${nested}&tab=files`, 'parent').href, parent);
+  assert.equal(resolveProductReturn(`${nested}&returnTo=${encodeURIComponent(list)}`, 'parent').href, parent);
+  for (const value of ['/projects', '/projects/other?tab=products', '/projects?view=table#fragment', '/products?view=table', 'https://evil.invalid/projects', '//evil.invalid/projects', `/projects?${'a'.repeat(MAX_LIST_QUERY_LENGTH + 1)}`]) {
+    assert.equal(projectProductsHref('parent', value), parent);
+    assert.equal(resolveProductReturn(`${parent}&${new URLSearchParams({ returnTo: value })}`, 'parent').href, parent);
+  }
 });
 test('global return preserves canonical view filters sort page without preferences',()=>{
  const href=globalProductsHref('view=table&q=long+name&project=p&client=c&engineer=e&active=0&sort=price&dir=asc&page=3&pageSize=50&unknown=discard');assert.equal(href,'/products?view=table&q=long+name&project=%5B%22p%22%5D&client=%5B%22c%22%5D&engineer=%5B%22e%22%5D&active=0&sort=price&dir=asc&page=3&pageSize=50');assert.deepEqual(resolveProductReturn(href,'parent'),{href,label:'Назад к списку изделий'});assert.equal(resolveProductReturn('/products','parent').href,'/products?view=kanban');
