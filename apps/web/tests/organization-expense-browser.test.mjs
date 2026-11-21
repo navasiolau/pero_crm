@@ -116,6 +116,15 @@ test("реестр расходов в Chromium сохраняет фильтр�
     const table = page.getByRole("table");
     const header = table.getByRole("columnheader");
     await expect(header).toHaveCount(7);
+    const backLink = page.getByRole("link", { name: "Назад к финансам", exact: true });
+    const title = page.getByRole("heading", { level: 1, name: "Расходы организации" });
+    await page.keyboard.press("Tab");
+    await expect(backLink).toBeFocused();
+    await expect(backLink).toHaveCSS("outline-style", "solid");
+    await expect(backLink).toHaveAttribute("href", "/finance");
+    const ledgerUrl = page.url();
+    await title.click();
+    await expect(page).toHaveURL(ledgerUrl);
     for (const [index, title] of ["ID", "Дата", "Назначение", "Касса", "Статья", "Сумма", "Документы"].entries())
       await expect(header.nth(index)).toContainText(title);
     const bodyRows = table.locator("tbody tr");
@@ -351,6 +360,13 @@ test("реестр расходов в Chromium сохраняет фильтр�
     const sidebar = await page.addStyleTag({ content: "@media (min-width: 768px) { main { margin-left: 16rem; } }" });
     for (const width of [1920, 1366, 1024, 840, 768, 390, 360, 320]) {
       await page.setViewportSize({ width, height: 844 });
+      const [linkBox, iconBox, titleBox] = await Promise.all([
+        backLink.boundingBox(), backLink.locator("svg").boundingBox(), title.boundingBox(),
+      ]);
+      assert.deepEqual([linkBox.width, linkBox.height, iconBox.width, iconBox.height], [40, 40, 16, 16]);
+      assert.ok(linkBox.x + linkBox.width <= titleBox.x &&
+        Math.abs(linkBox.y + linkBox.height / 2 - titleBox.y - titleBox.height / 2) <= 1,
+        `Стрелка слева от заголовка и занимает только свой квадрат при ширине ${width}`);
       const controls = [toolbar.getByRole("textbox", { name: "Поиск по расходам" }),
         ...primary.map(name => toolbar.getByRole("button", { name, exact: true }))];
       const boxes = await Promise.all(controls.map(control => control.boundingBox()));
