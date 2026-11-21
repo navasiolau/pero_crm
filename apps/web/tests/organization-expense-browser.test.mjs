@@ -131,12 +131,15 @@ test("реестр расходов в Chromium сохраняет фильтр�
     };
     await openGeneralExpense();
     const clipped = [];
-    for (const width of [320, 390, 640, 768, 1366]) {
-      await page.setViewportSize({ width, height: 844 });
+    for (const [width, height] of [[320, 420], [320, 740], [390, 844], [640, 800], [768, 900], [1366, 768]]) {
+      await page.setViewportSize({ width, height });
+      await detail.evaluate(async dialog => {
+        await new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)));
+        await Promise.all(dialog.getAnimations().map(animation => animation.finished.catch(() => {})));
+      });
       for (const name of ["Назначить на проект", "Оприходовать на склад", "Закрыть", "Удалить"]) {
         const button = detailButton(name);
         await expect(button).toBeEnabled();
-        await button.scrollIntoViewIfNeeded();
         const visible = await button.evaluate(element => {
           const dialog = element.closest("[data-slot=dialog-content]");
           const frame = dialog.getBoundingClientRect(), button = element.getBoundingClientRect();
@@ -149,12 +152,13 @@ test("реестр расходов в Chromium сохраняет фильтр�
           const inside = (rect, outer) => rect.left >= outer.left - 1 && rect.right <= outer.right + 1 &&
             rect.top >= outer.top - 1 && rect.bottom <= outer.bottom + 1;
           const label = [...text.getClientRects()].filter(rect => rect.width > 0);
-          const hitsButton = [button.left + 2, button.left + button.width / 2, button.right - 2].every(x =>
-            element.contains(document.elementFromPoint(x, button.top + button.height / 2)));
+          const x = button.left + button.width / 2, y = button.top + button.height / 2;
+          const hitsButton = [[x, y], [button.left + 2, y], [button.right - 2, y], [x, button.top + 2], [x, button.bottom - 2]]
+            .every(([px, py]) => element.contains(document.elementFromPoint(px, py)));
           return inside(button, { left, top, right, bottom }) && label.length > 0 &&
             label.every(rect => inside(rect, button)) && hitsButton;
         });
-        if (!visible) clipped.push(`${width}px · ${name}`);
+        if (!visible) clipped.push(`${width}×${height} · ${name}`);
       }
     }
     assert.deepEqual(clipped, [], "Кнопки расхода и их подписи должны быть видны целиком");
