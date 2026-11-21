@@ -275,6 +275,75 @@ test("реестр расходов в Chromium сохраняет фильтр�
     assert.equal(new URL(page.url()).searchParams.has("page"), false);
 
     const toolbar = page.getByRole("group", { name: "Фильтры расходов", exact: true });
+    const filterPage = await browser.newPage();
+    try {
+      const counters = new URLSearchParams({
+        purpose: JSON.stringify(["material", "delivery"]), cash: "a", article: "materials",
+        dateFrom: "2026-11-01", dateTo: "2026-11-30", amountFrom: "2", amountTo: "20",
+      });
+      const measurements = [];
+      const activeToolbar = filterPage.getByRole("group", { name: "Фильтры расходов", exact: true });
+      for (const width of [1920, 390, 360, 320]) {
+        await filterPage.setViewportSize({ width, height: 844 });
+        await filterPage.goto(`${url}?${counters}`);
+        const counts = [["Назначение", "2"], ["Касса", "1"]];
+        if (width < 400) counts.push(["Дата", "2"], ["Статья", "1"], ["Сумма", "2"]);
+        for (const [caption, count] of counts) {
+          const button = activeToolbar.getByRole("button", { name: caption, exact: true });
+          const label = caption === "Назначение" && width < 360 ? "Назн." : caption;
+          const text = await button.evaluate((button, fragments) => {
+            const nodes = document.createTreeWalker(button, NodeFilter.SHOW_TEXT);
+            const visible = [];
+            while (nodes.nextNode()) {
+              if (nodes.currentNode.parentElement.getClientRects().length) visible.push(nodes.currentNode);
+            }
+            const canvas = document.createElement("canvas").getContext("2d");
+            const bounds = button.getBoundingClientRect();
+            const arrow = button.querySelector("svg")?.getBoundingClientRect();
+            return fragments.map(fragment => {
+              const node = visible.find(node => node.data.includes(fragment));
+              if (!node) return null;
+              const range = document.createRange();
+              const start = node.data.indexOf(fragment);
+              range.setStart(node, start);
+              range.setEnd(node, start + fragment.length);
+              const { fontFamily, fontSize, fontStyle, fontWeight } = getComputedStyle(node.parentElement);
+              canvas.font = `${fontStyle} ${fontWeight} ${fontSize} ${fontFamily}`;
+              // Range возвращает границы шрифтового прямоугольника, включая спуск под базовой линией.
+              const { fontBoundingBoxDescent } = canvas.measureText(fragment);
+              const rect = range.getBoundingClientRect();
+              const fits = rect.width > 0 && rect.left >= bounds.left - 0.5 && rect.right <= (arrow?.width ? arrow.left : bounds.right) + 0.5
+                && rect.top >= bounds.top - 0.5 && rect.bottom <= bounds.bottom + 0.5;
+              return { fontSize, baseline: rect.bottom - fontBoundingBoxDescent, fits };
+            });
+          }, [label, "·", count]);
+          measurements.push({ width, label, text });
+        }
+        if (width < 400) {
+          const search = activeToolbar.getByRole("textbox", { name: "Поиск по расходам" });
+          const area = await search.evaluate(input => {
+            const bounds = input.getBoundingClientRect();
+            const exact = input.parentElement.querySelector("button").getBoundingClientRect();
+            const css = getComputedStyle(input);
+            const left = bounds.left + parseFloat(css.paddingLeft) + parseFloat(css.borderLeftWidth);
+            const right = Math.min(exact.left, bounds.right - parseFloat(css.paddingRight) - parseFloat(css.borderRightWidth));
+            const x = right - 1, y = bounds.top + bounds.height / 2;
+            return { x, y, usable: right - left, hitsInput: document.elementFromPoint(x, y) === input };
+          });
+          assert.ok(area.usable >= 24 && area.hitsInput, `Поиск должен оставаться редактируемым при ${width} px: ${JSON.stringify(area)}`);
+          await filterPage.mouse.click(area.x, area.y);
+          await expect(search).toBeFocused();
+          await filterPage.keyboard.insertText("А");
+          await expect(search).toHaveValue("А");
+        }
+      }
+      assert.deepEqual(measurements.filter(({ text: [label, separator, count] }) =>
+        !label?.fits || !separator?.fits || !count?.fits || label.fontSize !== count.fontSize
+        || Math.abs(label.baseline - count.baseline) > 0.5), [],
+      "Подпись, разделитель и счётчик должны помещаться в кнопку, подпись и счётчик должны иметь общий кегль и базовую линию");
+    } finally {
+      await filterPage.close();
+    }
     const primary = ["Дата", "Назначение", "Касса", "Статья", "Сумма"];
     // В оболочке CRM боковое меню занимает 16 rem при ширине от 768 px.
     const sidebar = await page.addStyleTag({ content: "@media (min-width: 768px) { main { margin-left: 16rem; } }" });
