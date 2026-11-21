@@ -122,16 +122,24 @@ def container_environment(container: dict) -> dict:
 
 
 def migration_enabled(config: dict, target: Target) -> bool:
-    env = config["services"]["web"].get("environment") or {}
+    web = config["services"]["web"]
+    env = web.get("environment") or {}
+    secret_path = target.directory + "/.pero-migrator.env"
+    volumes = [mount for mount in web.get("volumes", []) if mount.get("target") == "/run/pero-crm/migrator.env"]
     if str(env.get("PERO_DB_MIGRATE_ON_START", "0")) != "1":
+        if target.project == "crm":
+            require(not volumes and str(env.get("PERO_DB_ENFORCE_RUNTIME", "0")) == "0", "migration-mode-refused")
         return False
-    require(target.project == "crm-staging" and str(env.get("PERO_DB_ENFORCE_RUNTIME")) == "1", "migration-mode-refused")
+    require(target == target_for(target.project, target.directory)
+            and str(env.get("PERO_DB_ENFORCE_RUNTIME")) == "1", "migration-mode-refused")
     require(not any(env.get(key) for key in ("DATABASE_MIGRATION_URL", "DB_PASSWORD", "POSTGRES_PASSWORD",
                                             "DIRECT_URL", "SHADOW_DATABASE_URL")), "migration-web-credentials")
     require(str(env.get("PERO_DB_SKIP_MIGRATION", "0")) == "0", "migration-bypass-refused")
-    volumes = [mount for mount in config["services"]["web"].get("volumes", []) if mount.get("target") == "/run/pero-crm/migrator.env"]
+    if target.project == "crm":
+        require(not any(web.get(key) for key in ("entrypoint", "command", "user", "privileged")),
+                "migration-web-startup-override")
     require(len(volumes) == 1 and volumes[0].get("type") == "bind" and volumes[0].get("read_only") is True
-            and volumes[0].get("source") == target.directory + "/.pero-migrator.env"
+            and volumes[0].get("source") == secret_path
             and volumes[0].get("bind", {}).get("create_host_path") is False, "migration-mount-refused")
     return True
 
@@ -470,6 +478,11 @@ def watch_pair(runtime, target: Target, config: dict, db_before: tuple, web: dic
     def database_check():
         require(database_snapshot(runtime.inspect_container(target, "db"), target, config) == db_before, "database-drift")
 
+    def containers_check():
+        for service, previous in before_containers.items():
+            current = runtime.inspect_optional_container(target, service)
+            require(((current["Id"], current["Image"]) if current else None) == previous, "kp-container-drift")
+
     def wait_healthy(ids: dict, timeout: float):
         deadline = runtime.monotonic() + timeout
         while True:
@@ -509,9 +522,7 @@ def watch_pair(runtime, target: Target, config: dict, db_before: tuple, web: dic
                        web_ref=binding["web"], renderer_ref=binding["kp-renderer"])
         require(runtime.compose_config(target) == config, "compose-drift")
         database_check()
-        for service, previous in before_containers.items():
-            current = runtime.inspect_optional_container(target, service)
-            require(((current["Id"], current["Image"]) if current else None) == previous, "kp-container-drift")
+        containers_check()
         result = {"project": target.project, "image": binding["web_id"], "renderer": binding["renderer_id"],
                   "revision": binding["revision"], "web_ref": binding["web"], "renderer_ref": binding["kp-renderer"], "database": db_before[0]}
         if old_ids == desired_ids and not (migrate and migration_cutover_needed(web, config)):
@@ -528,10 +539,12 @@ def watch_pair(runtime, target: Target, config: dict, db_before: tuple, web: dic
             context["migration"] = result["migration"] = "applied"
             database_check()
             require(runtime.compose_config(target) == config, "compose-drift")
+            if target.project == "crm":
+                containers_check()
         changed = True
         references = {"web": binding["web"], "kp-renderer": binding["kp-renderer"]}
         if migrate:
-            runtime.up_stable_pin(target, references)
+            runtime.up_stable_pin(target, references, config)
         else:
             runtime.up_pair(target, references)
         deployed = wait_healthy(desired_ids, health_timeout)
@@ -549,12 +562,15 @@ def watch_pair(runtime, target: Target, config: dict, db_before: tuple, web: dic
                 if current is not None:
                     check_container(current, target, service, require_running=False)
                     require(current["Image"] in (old_ids[service], image), "kp-rollback-image-drift")
+            if migrate and target.project == "crm":
+                context["rollback"] = "review-required"
+                raise WatchError("migration-rollback-requires-reviewed-recovery") from None
             try:
                 if migrate:
                     labels = runtime.inspect_image_ref(old_ids["web"]).get("Config", {}).get("Labels") or {}
                     require(labels.get("pero.crm.runtime-init") == "1" and not migration_cutover_needed(web, config),
                             "migration-rollback-requires-original-config")
-                    runtime.up_stable_pin(target, old_ids, skip_migration=True)
+                    runtime.up_stable_pin(target, old_ids, config, skip_migration=True)
                 else:
                     runtime.up_pair(target, old_ids)
                 if old_ids["kp-renderer"] is None:
@@ -650,7 +666,11 @@ def _watch(runtime, context: dict, health_timeout: float, poll_interval: float) 
                 context["migration"] = result["migration"] = "applied"
                 check_database()
                 require(runtime.compose_config(target) == config, "compose-drift")
-                runtime.up_stable_pin(target, {"web": reference})
+                if target.project == "crm":
+                    current = runtime.inspect_container(target, "web")
+                    check_container(current, target, "web")
+                    require((current["Id"], current["Image"]) == (web["Id"], web["Image"]), "web-container-drift")
+                runtime.up_stable_pin(target, {"web": reference}, config)
             else:
                 runtime.up(target)
             deadline = runtime.monotonic() + health_timeout
@@ -922,8 +942,10 @@ class DockerRuntime:
                     and (current.st_dev, current.st_ino) == (created.st_dev, created.st_ino), "kp-pin-file-drift")
             temporary.unlink()  # Только собственный exact-path override, не конфигурация сервера.
 
-    def up_stable_pin(self, target: Target, references: dict, *, skip_migration: bool = False) -> None:
-        require(target.project == "crm-staging" and {"web"} <= set(references) <= {"web", "kp-renderer"},
+    def up_stable_pin(self, target: Target, references: dict, expected_config: dict, *, skip_migration: bool = False) -> None:
+        require(target == target_for(target.project, target.directory)
+                and {"web"} <= set(references) <= {"web", "kp-renderer"}
+                and (not skip_migration or target.project == "crm-staging"),
                 "migration-pin-target")
         replacements = {}
         for service, repository, key in (("web", WEB_REPOSITORY, "CRM_WATCH_WEB_IMAGE"),
@@ -931,15 +953,25 @@ class DockerRuntime:
             reference = references.get(service)
             if reference is None:
                 continue
-            require(bool(IMAGE_RE.fullmatch(reference)) or bool(re.fullmatch(re.escape(repository) + r"@sha256:[0-9a-f]{64}", reference)),
+            require(bool(re.fullmatch(re.escape(repository) + r"@sha256:[0-9a-f]{64}", reference))
+                    or (target.project == "crm-staging" and bool(IMAGE_RE.fullmatch(reference))),
                     "migration-pin-reference")
             replacements[key] = reference
-        replacements["CRM_WATCH_SKIP_MIGRATION"] = "1" if skip_migration else "0"
+        expected_skip = "1" if skip_migration else "0"
+        if target.project == "crm-staging":
+            replacements["CRM_WATCH_SKIP_MIGRATION"] = expected_skip
         config = json.loads(self.compose(target, ["config", "--format", "json"], "migration-pin-config", overrides=replacements))
         services = config.get("services", {})
         require(all(services.get(key, {}).get("image") == value for key, value in references.items() if value is not None)
-                and str(services.get("web", {}).get("environment", {}).get("PERO_DB_SKIP_MIGRATION")) == replacements["CRM_WATCH_SKIP_MIGRATION"],
+                and str(services.get("web", {}).get("environment", {}).get("PERO_DB_SKIP_MIGRATION")) == expected_skip,
                 "migration-pin-config-refused")
+        if target.project == "crm":
+            # Production pin меняет только image, прочие настройки берутся из проверенного Compose.
+            expected_services = {
+                name: {**service, "image": references[name]} if references.get(name) is not None else service
+                for name, service in expected_config["services"].items()
+            }
+            require(config == {**expected_config, "services": expected_services}, "migration-pin-config-drift")
         self.compose(target, ["up", "-d", "--no-deps", "--no-build", "--pull", "never", *[key for key, value in references.items() if value]],
                      "migration-pinned-up", timeout=60, overrides=replacements)
 
