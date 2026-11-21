@@ -48,6 +48,7 @@ type SuccessReceipt = {
 
 export function CashPayoutForm({
   mode,
+  adaptiveFields = false,
   users,
   accounts,
   month,
@@ -59,6 +60,7 @@ export function CashPayoutForm({
   onUncertainChange,
 }: {
   mode: Mode;
+  adaptiveFields?: boolean;
   users: EmployeeOption[];
   accounts: CashAccountOption[];
   month?: string;
@@ -218,47 +220,51 @@ export function CashPayoutForm({
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="@container/payout-form flex flex-col gap-4">
       {uncertain ? (
-        <div className="rounded-lg border border-amber-600/35 bg-amber-500/5 p-3 text-sm">
+        <div className="rounded-lg border border-amber-600/35 bg-amber-500/5 p-3 text-sm wrap-anywhere">
           Операция ожидает подтверждения: {users.find((item) => item.id === uncertain.payload.userId)?.name ?? "сотрудник"}, {formatAmount(uncertain.payload.cashAmount, uncertain.payload.expectedCashCurrency)} из кассы «{accounts.find((item) => item.id === uncertain.payload.cashAccountId)?.name ?? "выбрана"}».
           Поля заблокированы, чтобы повторить тот же запрос без риска двойной выдачи.
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-1.5">
-        <Label>Сотрудник *</Label>
-        <SearchableSelect
-          options={users.map((item) => ({ value: item.id, label: item.name, hint: item.position ?? undefined }))}
-          value={userId}
-          onChange={(value) => { setUserId(value); clearPreview(); }}
-          placeholder="Выберите сотрудника…"
-          searchPlaceholder="Поиск по ФИО и должности…"
-          className="min-h-12 h-auto whitespace-normal text-left"
-          disabled={locked || checking}
-        />
-      </div>
+      <div className={adaptiveFields ? "grid gap-4 @[540px]/payout-form:grid-cols-2" : "grid gap-4"}>
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <Label>Сотрудник *</Label>
+          <SearchableSelect
+            options={users.map((item) => ({ value: item.id, label: item.name, hint: item.position ?? undefined }))}
+            value={userId}
+            onChange={(value) => { setUserId(value); clearPreview(); }}
+            placeholder="Выберите сотрудника…"
+            searchPlaceholder="Поиск по ФИО и должности…"
+            className="min-h-12 min-w-0 h-auto text-left"
+            wrapOptions={adaptiveFields}
+            disabled={locked || checking}
+          />
+        </div>
 
-      <div className="flex flex-col gap-1.5">
-        <Label>Касса *</Label>
-        <SearchableSelect
-          options={accounts.filter((item) => item.active).map((item) => ({
-            value: item.id,
-            label: `${item.name} · ${item.currency}`,
-            hint: `Доступно ${formatAmount(item.balance, item.currency)}`,
-          }))}
-          value={cashAccountId}
-          onChange={(value) => {
-            setCashAccountId(value);
-            setCashAmount("");
-            clearPreview();
-          }}
-          placeholder="Выберите кассу…"
-          searchPlaceholder="Поиск кассы…"
-          className="min-h-12 h-auto whitespace-normal text-left"
-          disabled={locked || checking}
-        />
-        {account ? <p className="text-xs text-muted-foreground">Остаток: {formatAmount(account.balance, account.currency)}</p> : null}
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <Label>Касса *</Label>
+          <SearchableSelect
+            options={accounts.filter((item) => item.active).map((item) => ({
+              value: item.id,
+              label: `${item.name} · ${item.currency}`,
+              hint: `Доступно ${formatAmount(item.balance, item.currency)}`,
+            }))}
+            value={cashAccountId}
+            onChange={(value) => {
+              setCashAccountId(value);
+              setCashAmount("");
+              clearPreview();
+            }}
+            placeholder="Выберите кассу…"
+            searchPlaceholder="Поиск кассы…"
+            className="min-h-12 min-w-0 h-auto text-left"
+            wrapOptions={adaptiveFields}
+            disabled={locked || checking}
+          />
+          {account ? <p className="text-xs text-muted-foreground">Остаток: {formatAmount(account.balance, account.currency)}</p> : null}
+        </div>
       </div>
 
       <div className="flex flex-col gap-1.5">
