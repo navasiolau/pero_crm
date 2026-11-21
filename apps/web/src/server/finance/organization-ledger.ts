@@ -50,6 +50,8 @@ export async function loadOrganizationExpensePage(actor: FinanceWorkspaceActor, 
   requireFinanceWorkspaceActor(actor);
   const { where, orderBy, page, pageSize, sort, dir } = organizationExpenseQuery(query);
   return db.$transaction(async tx => {
+    // Компиляция JIT для поиска по связанным строкам может исчерпать тайм-аут транзакции.
+    await tx.$executeRaw`SET LOCAL jit = off`;
     const { _count, _sum } = await tx.payment.aggregate({ where, _count: true, _sum: { bynAmount: true } });
     const currentPage = pageSize === "all" ? 1 : Math.min(page, Math.max(1, Math.ceil(_count / pageSize)));
     const skip = pageSize === "all" ? undefined : (currentPage - 1) * pageSize;

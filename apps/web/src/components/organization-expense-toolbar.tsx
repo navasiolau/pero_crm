@@ -253,13 +253,13 @@ export function OrganizationExpenseToolbar({ options }: Pick<OrganizationExpense
           onChange={event => setQ(event.target.value)}
           aria-label="Поиск по расходам"
           autoComplete="off"
-          placeholder="Поиск по всем полям расходов"
+          placeholder="Поиск по всем полям"
           maxLength={100}
           className="h-11 pr-7 pl-1.5 placeholder:text-transparent max-md:min-h-11! max-md:text-[16px]! max-[359px]:pr-6 md:h-10 md:pr-10 md:pl-8 md:placeholder:text-muted-foreground"
         />
         {!q ? (
-          <span aria-hidden className="pointer-events-none absolute inset-y-0 left-1.5 flex items-center text-[13px] text-muted-foreground md:hidden">
-            Поиск…
+          <span aria-hidden className="pointer-events-none absolute inset-y-0 right-6 left-1.5 flex items-center overflow-hidden text-[13px] whitespace-nowrap text-muted-foreground md:hidden">
+            Поиск
           </span>
         ) : null}
         <ExpenseFilterPopover label="Точные условия" otherKeys={exactKeys} ranges={exactRanges}

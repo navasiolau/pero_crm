@@ -89,10 +89,16 @@ test("общий поиск различает деньги, курс и скл�
 
 test("итог и количество независимы от размера, авторизация предшествует чтению", async () => {
   let count = 101;
+  let jitDisabled = false;
   const calls: Array<{ name: string; input: unknown }> = [];
   const reads = {
+    async $executeRaw(statement: TemplateStringsArray) {
+      assert.deepEqual([...statement], ["SET LOCAL jit = off"]);
+      jitDisabled = true;
+    },
     payment: {
       async aggregate(input: unknown) {
+        assert(jitDisabled);
         calls.push({ name: "aggregate", input });
         return { _count: count, _sum: { bynAmount: count ? new Prisma.Decimal("123456789012345678.09") : null } };
       },
@@ -107,12 +113,14 @@ test("итог и количество независимы от размера,
   };
   const db = { async $transaction(fn: (tx: typeof reads) => unknown, options: unknown) {
     assert.deepEqual(options, { isolationLevel: "RepeatableRead" });
+    jitDisabled = false;
     return fn(reads);
   } } as unknown as Pick<PrismaClient, "$transaction">;
   const actor = { id: "finance", roles: ["ADMIN"] as ["ADMIN"] };
 
   await assert.rejects(() => loadOrganizationExpensePage({ ...actor, roles: ["MANAGER"] }, "", db), /Недостаточно прав/);
   assert.equal(calls.length, 0);
+  assert.equal(jitDisabled, false);
   const page = await loadOrganizationExpensePage(actor, "pageSize=100&page=500&currency=BYN", db);
   assert.equal(page.page, 2);
   assert.equal(page.total, 101);

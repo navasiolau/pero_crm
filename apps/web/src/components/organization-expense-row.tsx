@@ -59,7 +59,7 @@ function ExpensePurpose({ row }: { row: OrganizationPaymentRow }) {
 
 function ExpenseAmount({ row }: { row: OrganizationPaymentRow }) {
   return (
-    <div className="shrink-0 text-right whitespace-nowrap tabular-nums">
+    <div className="ml-auto max-w-full shrink-0 text-right whitespace-nowrap tabular-nums">
       <p className="font-medium">{formatExactMoney(row.amount.toFixed(2), row.currency)}</p>
       {row.currency !== INTERNAL_CURRENCY && (
         <p className="text-xs text-muted-foreground">{formatExactMoney(row.bynAmount.toFixed(2), INTERNAL_CURRENCY)}</p>
@@ -112,9 +112,9 @@ export const organizationExpenseColumns: DataColumn<OrganizationPaymentRow>[] = 
 export function OrganizationExpenseMobileCard({ row }: { row: OrganizationPaymentRow }) {
   return (
     <div className="min-w-0 space-y-1.5">
-      <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center gap-x-1.5 max-[359px]:text-[16px]">
         <CopyExpenseId id={row.id} />
-        <span className="mr-auto text-sm whitespace-nowrap">{formatDate(row.paidAt)}</span>
+        <span className="mr-auto text-sm whitespace-nowrap max-[359px]:text-[14px]">{formatDate(row.paidAt)}</span>
         <ExpenseAmount row={row} />
       </div>
       <ExpensePurpose row={row} />
