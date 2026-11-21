@@ -35,7 +35,7 @@ const clearAllFilters = Object.fromEntries<null>([
   "q", ...Object.keys(expenseChoiceFields), ...Object.keys(expenseTextFields),
   ...Object.keys(expenseRangeFields).flatMap(field => bounds.map(boundary => field + boundary)),
 ].map(key => [key, null]));
-const compactTrigger = "h-11 min-w-0 justify-center gap-1 px-1 text-[11px] font-medium transition-colors max-[400px]:px-px max-md:min-h-11! max-md:min-w-0! max-md:text-[11px]! md:h-10 md:px-2 md:text-xs @[52rem]/expenses:justify-between @[52rem]/expenses:px-2.5 @[52rem]/expenses:text-sm";
+const compactTrigger = "h-11 min-w-0 justify-center gap-1 px-1 text-[11px] font-medium transition-colors max-[400px]:px-px max-[400px]:tracking-tight max-md:min-h-11! max-md:min-w-0! max-md:text-[11px]! md:h-10 md:px-2 md:text-xs @[52rem]/expenses:justify-between @[52rem]/expenses:px-2.5 @[52rem]/expenses:text-sm";
 const dateFormat = new Intl.DateTimeFormat("ru-RU", {
   day: "2-digit", month: "2-digit", year: "2-digit", timeZone: "UTC",
 });
@@ -61,7 +61,9 @@ function FilterTriggerText({ label, narrowLabel, count, detail }: {
         <span className="hidden min-[360px]:inline">{label}</span>
       </> : <span>{label}</span>}
       {count > 0 ? (
-        <span aria-hidden className={cn("tabular-nums", detail && "@[62rem]/expenses:hidden")}>{"\u202f·\u202f"}{count}</span>
+        <span aria-hidden className={cn("tabular-nums", detail && "@[62rem]/expenses:hidden")}>
+          <span className="mx-px md:mx-1">·</span>{count}
+        </span>
       ) : null}
       {detail ? <span aria-hidden className="ms-1.5 hidden text-xs font-normal text-muted-foreground @[62rem]/expenses:inline">{detail}</span> : null}
     </span>
