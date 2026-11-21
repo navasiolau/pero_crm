@@ -35,7 +35,7 @@ const clearAllFilters = Object.fromEntries<null>([
   "q", ...Object.keys(expenseChoiceFields), ...Object.keys(expenseTextFields),
   ...Object.keys(expenseRangeFields).flatMap(field => bounds.map(boundary => field + boundary)),
 ].map(key => [key, null]));
-const compactTrigger = "relative h-11 min-w-0 justify-center gap-1 px-1 text-[11px] font-medium transition-colors max-md:min-h-11! max-md:min-w-0! max-md:text-[11px]! md:h-10 md:px-2 md:text-xs @[52rem]/expenses:justify-between @[52rem]/expenses:px-2.5 @[52rem]/expenses:text-sm";
+const compactTrigger = "h-11 min-w-0 justify-center gap-1 px-1 text-[11px] font-medium transition-colors max-[400px]:px-px max-md:min-h-11! max-md:min-w-0! max-md:text-[11px]! md:h-10 md:px-2 md:text-xs @[52rem]/expenses:justify-between @[52rem]/expenses:px-2.5 @[52rem]/expenses:text-sm";
 const dateFormat = new Intl.DateTimeFormat("ru-RU", {
   day: "2-digit", month: "2-digit", year: "2-digit", timeZone: "UTC",
 });
@@ -55,20 +55,15 @@ function FilterTriggerText({ label, narrowLabel, count, detail }: {
   label: string; narrowLabel?: string; count: number; detail?: string;
 }) {
   return <>
-    <span className="flex min-w-0 items-center gap-1.5">
+    <span className="min-w-0 truncate">
       {narrowLabel ? <>
         <span className="min-[360px]:hidden">{narrowLabel}</span>
         <span className="hidden min-[360px]:inline">{label}</span>
       </> : <span>{label}</span>}
       {count > 0 ? (
-        <span aria-hidden className={cn(
-          "absolute right-0.5 bottom-0 text-[8px] leading-2 tabular-nums md:static md:text-xs md:leading-normal",
-          detail && "@[62rem]/expenses:hidden",
-        )}>
-          <span className="hidden md:inline"> · </span>{count}
-        </span>
+        <span aria-hidden className={cn("tabular-nums", detail && "@[62rem]/expenses:hidden")}>{"\u202f·\u202f"}{count}</span>
       ) : null}
-      {detail ? <span aria-hidden className="hidden truncate text-xs font-normal text-muted-foreground @[62rem]/expenses:inline">{detail}</span> : null}
+      {detail ? <span aria-hidden className="ms-1.5 hidden text-xs font-normal text-muted-foreground @[62rem]/expenses:inline">{detail}</span> : null}
     </span>
     <ChevronDown className="hidden size-3.5 shrink-0 text-muted-foreground @[52rem]/expenses:block" />
   </>;
@@ -245,8 +240,8 @@ export function OrganizationExpenseToolbar({ options }: Pick<OrganizationExpense
   const { q, setQ } = useListSearch();
 
   return (
-    <div role="group" aria-label="Фильтры расходов" className="flex min-w-0 items-center gap-[3px] md:gap-1.5 @[52rem]/expenses:grid @[52rem]/expenses:grid-cols-[minmax(0,2.5fr)_minmax(0,1.5fr)_minmax(max-content,1.2fr)_repeat(3,minmax(max-content,1fr))] @[52rem]/expenses:gap-2">
-      <div className="relative min-w-0 flex-1">
+    <div role="group" aria-label="Фильтры расходов" className="flex min-w-0 items-center gap-[3px] max-[400px]:gap-px md:gap-1.5 @[52rem]/expenses:grid @[52rem]/expenses:grid-cols-[minmax(0,2.5fr)_minmax(0,1.5fr)_minmax(max-content,1.2fr)_repeat(3,minmax(max-content,1fr))] @[52rem]/expenses:gap-2">
+      <div className="@container/search relative min-w-0 flex-1">
         <Search className="pointer-events-none absolute top-1/2 left-2 hidden size-4 -translate-y-1/2 text-muted-foreground md:block" />
         <Input
           value={q}
@@ -255,11 +250,12 @@ export function OrganizationExpenseToolbar({ options }: Pick<OrganizationExpense
           autoComplete="off"
           placeholder="Поиск по всем полям"
           maxLength={100}
-          className="h-11 pr-7 pl-1.5 placeholder:text-transparent max-md:min-h-11! max-md:text-[16px]! max-[359px]:pr-6 md:h-10 md:pr-10 md:pl-8 md:placeholder:text-muted-foreground"
+          className="peer h-11 pr-7 pl-1.5 placeholder:text-transparent max-md:min-h-11! max-md:text-[16px]! max-[400px]:pl-0.5 max-[359px]:pr-6 md:h-10 md:pr-10 md:pl-8 md:placeholder:text-muted-foreground"
         />
         {!q ? (
-          <span aria-hidden className="pointer-events-none absolute inset-y-0 right-6 left-1.5 flex items-center overflow-hidden text-[13px] whitespace-nowrap text-muted-foreground md:hidden">
-            Поиск
+          <span aria-hidden className="pointer-events-none absolute inset-y-0 right-6 left-1.5 flex items-center overflow-hidden text-[13px] whitespace-nowrap text-muted-foreground peer-focus:invisible md:hidden">
+            <Search className="size-3.5 shrink-0 @[4.25rem]/search:hidden" />
+            <span className="hidden @[4.25rem]/search:inline">Поиск</span>
           </span>
         ) : null}
         <ExpenseFilterPopover label="Точные условия" otherKeys={exactKeys} ranges={exactRanges}
