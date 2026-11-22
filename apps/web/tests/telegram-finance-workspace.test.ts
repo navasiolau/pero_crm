@@ -39,9 +39,9 @@ test("grant is tamper-evident and route scope excludes organizational and person
   assert.equal(readFinanceGrant(cookie, secret + "x", now), null);
   assert.equal(readFinanceGrant(cookie.replace(/^./, "b"), secret, now), null);
   for (const path of ["/finance", "/finance/projects/205", "/finance/advances", "/finance/payroll/export", "/api/finance/documents/upload",
-    "/api/finance/documents/d1", "/api/logistics/documents/d2", "/logistics/t1"]) assert.equal(isTelegramFinancePath(path), true, path);
+    "/api/finance/documents/d1", "/api/logistics/documents/d2", "/api/logistics/documents/upload", "/logistics/t1"]) assert.equal(isTelegramFinancePath(path), true, path);
   for (const path of ["/settings", "/payroll", "/projects/205", "/warehouse", "/finance-settings", "/finance/payroll/other",
-    "/api/v1/bot/payments", "/api/files/f1", "/api/logistics/documents/upload", "/api/logistics/documents/upload/x", "/plan", "/api/calendar", "/notifications"]) assert.equal(isTelegramFinancePath(path), false, path);
+    "/api/v1/bot/payments", "/api/files/f1", "/api/logistics/documents/upload/x", "/plan", "/api/calendar", "/notifications"]) assert.equal(isTelegramFinancePath(path), false, path);
 });
 
 const require = createRequire(import.meta.url);
@@ -63,12 +63,18 @@ let linked = true;
 let activeLink = dbLink;
 let lookups = 0;
 let webAuthCalls = 0;
-inject("../src/lib/prisma", { prisma: { telegramLink: { findUnique: async ({ where }: { where: { chatId: string } }) => {
-  lookups++;
-  assert.equal(where.chatId, String(user.id));
-  return linked ? activeLink : null;
-} } } });
-inject("next/headers", { cookies: async () => ({ get: () => undefined }) });
+let activeCookie: string | undefined;
+const fakePrisma = {
+  telegramLink: { findUnique: async ({ where }: { where: { chatId: string } }) => {
+    lookups++;
+    assert.equal(where.chatId, String(user.id));
+    return linked ? activeLink : null;
+  } },
+  user: { findUnique: async ({ where }: { where: { id: string } }) => where.id === activeLink.user.id ? activeLink.user : null },
+  logisticsTrip: { count: async () => 0, findMany: async () => [] },
+};
+inject("../src/lib/prisma", { prisma: fakePrisma });
+inject("next/headers", { cookies: async () => ({ get: () => activeCookie ? { value: activeCookie } : undefined }) });
 inject("../src/auth", { auth: async (request?: NextRequest) => {
   webAuthCalls++;
   return request ? Response.redirect(origin + "/login") : null;
@@ -150,4 +156,59 @@ test("the staging Mini App origin requires Telegram authentication for pages, ac
   assert.equal(await scopedFinanceAuth(true), null);
   assert.equal(webAuthCalls, before);
   assert.equal((await middleware(middlewareRequest("/finance", ""), event))?.headers.get("location"), origin + "/login");
+});
+
+test("Telegram logistics follows CRM roles and secures the multipart upload", async () => {
+  const uploads: { actor: string; source: string | undefined }[] = [];
+  inject("../src/server/logistics/service", {
+    logisticsTransaction: (operation: (tx: typeof fakePrisma) => unknown) => operation(fakePrisma),
+    logisticsDocuments: { upload: async (actor: string, _file: unknown, options: { source?: string }) => {
+      uploads.push({ actor, source: options.source });
+      return { document: { id: "test-document" }, repeated: false };
+    } },
+  });
+  const { listLogisticsTrips } = require("../src/server/logistics/queries") as typeof import("../src/server/logistics/queries");
+  const { POST: upload } = require("../src/app/api/logistics/documents/upload/route") as typeof import("../src/app/api/logistics/documents/upload/route");
+  function uploadRequest(requestOrigin = origin) {
+    const fields = new FormData();
+    fields.set("tripId", "c401d740-926b-4aa5-bb69-6a621ea9d4b7");
+    fields.set("clientMutationId", "c401d740-926b-4aa5-bb69-6a621ea9d4b8");
+    fields.set("stage", "ISSUED");
+    fields.set("file", new Blob(["%PDF"], { type: "application/pdf" }), "ttn.pdf");
+    return new Request(origin + "/api/logistics/documents/upload", {
+      method: "POST", body: fields, headers: { origin: requestOrigin, [TELEGRAM_FINANCE_ONLY_HEADER]: "1" },
+    });
+  }
+  const webCalls = webAuthCalls;
+  try {
+    const noSession = uploadRequest();
+    assert.equal((await upload(noSession)).status, 401);
+    assert.equal(noSession.bodyUsed, false);
+    for (const [roles, mode, canDelete] of [
+      [["ADMIN"], "manage", true],
+      [["PROCUREMENT"], "manage", false],
+      [["ACCOUNTANT"], "documents", false],
+    ] as const) {
+      activeLink = { ...dbLink, user: { ...dbUser, roles: [...roles] } };
+      const issued = await POST(request(signed()));
+      activeCookie = issued.cookies.get(TELEGRAM_FINANCE_COOKIE)?.value;
+      assert.ok(activeCookie);
+      const list = await listLogisticsTrips();
+      assert.equal(list.mode, mode);
+      assert.equal(list.mode === "manage" && list.canDelete, canDelete);
+    }
+    const forbidden = uploadRequest();
+    assert.equal((await upload(forbidden)).status, 403);
+    assert.equal(forbidden.bodyUsed, false);
+    assert.deepEqual(uploads, []);
+    activeLink = { ...dbLink, user: { ...dbUser, roles: ["ADMIN"] } };
+    const wrongOrigin = uploadRequest("https://foreign.test");
+    assert.equal((await upload(wrongOrigin)).status, 403);
+    assert.equal(wrongOrigin.bodyUsed, false);
+    assert.equal((await upload(uploadRequest())).status, 201);
+    assert.deepEqual(uploads, [{ actor: dbUser.id, source: "telegram" }]);
+    assert.equal(webAuthCalls, webCalls);
+  } finally {
+    activeCookie = undefined;
+  }
 });

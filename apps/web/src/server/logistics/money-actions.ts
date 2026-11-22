@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { auth } from "@/auth";
+import { financeSessionSource, scopedFinanceAuth } from "@/server/telegram/finance-session";
 import { prisma } from "@/lib/prisma";
 import { UploadError } from "@/server/files/upload-result";
 import { withTaskTransaction } from "@/server/tasks/transaction";
@@ -14,7 +14,9 @@ function errorResult(error: unknown) {
 }
 async function savePosting(input: unknown, mode: "post" | "correct") {
   try {
-    const result = await createLogisticsPostingCore((await auth())?.user.id, input, mode, { db: prisma, transaction: withTaskTransaction });
+    const session = await scopedFinanceAuth();
+    const source = session ? financeSessionSource(session) : "web";
+    const result = await createLogisticsPostingCore(session?.user.id, input, mode, { db: prisma, transaction: withTaskTransaction }, source);
     await (async () => {
       if (result.eventId) await dispatchEvent(result.eventId).catch(() => {});
       for (const path of ["/logistics", `/logistics/${result.tripId}`, "/finance/expenses", "/finance/accounts", "/finance/accounts/report", "/finance/payroll"])

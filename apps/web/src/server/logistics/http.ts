@@ -3,8 +3,13 @@ import { privateFileHeaders } from "@/server/files/private-response";
 import { UploadError, uploadFailure, type UploadPhase } from "@/server/files/upload-result";
 import { spoolMultipartUpload, type MultipartUpload } from "@/server/files/multipart-upload";
 import type { createLogisticsDocumentService } from "./documents";
+import type { DomainActor } from "@/server/actor";
 
-type HttpDependencies = { authorize: () => Promise<string>; service: ReturnType<typeof createLogisticsDocumentService> };
+type HttpDependencies = {
+  authorize: () => Promise<string>;
+  service: ReturnType<typeof createLogisticsDocumentService>;
+  source?: DomainActor["source"];
+};
 const privateHeaders = { "Cache-Control": "private, no-store", "Vary": "Cookie, Authorization", "X-Content-Type-Options": "nosniff" };
 
 export async function uploadLogisticsDocumentResponse(request: Request, dependencies: HttpDependencies) {
@@ -24,7 +29,7 @@ export async function uploadLogisticsDocumentResponse(request: Request, dependen
       throw new UploadError("LOGISTICS_DOCUMENT_INVALID", 422, "request", "Выберите ТТН и отметьте одну или две печати", "validation");
     const mimeType = file.type || "application/octet-stream";
     const result = await dependencies.service.upload(actorId, { tripId, clientMutationId: mutation, stage,
-      ttnNumber, fileName: file.name, mimeType, bytes: file }, { onPhase: next => { phase = next; } });
+      ttnNumber, fileName: file.name, mimeType, bytes: file }, { source: dependencies.source, onPhase: next => { phase = next; } });
     return Response.json({ ok: true, ...result, requestId }, { status: result.repeated ? 200 : 201, headers: privateHeaders });
   } catch (error) {
     const failedPhase = phase as UploadPhase;

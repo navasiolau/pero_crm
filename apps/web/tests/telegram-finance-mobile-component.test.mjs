@@ -33,14 +33,29 @@ const trip = {
   documents: [{ id: "sample-document", source: "logistics", fileName: "ТТН-142.pdf", mimeType: "application/pdf",
     stage: "ISSUED", ttnNumber: "142", size: 256, createdAt: "2026-11-18T09:00:00Z" }],
 };
+const projectId = "11111111-2222-4333-8111-111111111111";
+const productId = "11111111-2222-4333-8111-111111111112";
+const managedTrip = { ...trip, mode: "manage", revision: 1, comment: "", lines: [],
+  shares: [{ id: "sample-share", projectId, projectNumber: "П-142", projectTitle: "Демонстрационный проект", percentBps: 10000 }],
+  money: { current: null, history: [] }
+};
 
 const pathname = window.location.pathname;
-const allowPayroll = new URLSearchParams(window.location.search).get("role") !== "procurement";
+const role = new URLSearchParams(window.location.search).get("role");
+const allowPayroll = role !== "procurement";
 const telegram = !new URLSearchParams(window.location.search).has("web");
+const logisticsQuery = { query: "", page: 1, pageSize: 20, direction: "desc" };
+const logistics = role === "admin" || role === "procurement" ? {
+  mode: "manage", canDelete: role === "admin", total: 1, rows: [managedTrip], initialTrip: null, query: logisticsQuery,
+  options: { projects: [{ id: projectId, number: "П-142", title: "Демонстрационный проект",
+    products: [{ id: productId, number: "П-142-1", title: "Стол", quantity: 1 }] }], materials: [] },
+  moneyOptions: { cashAccounts: [] }, budget: null,
+} : { mode: "documents", total: 1, rows: [trip], initialTrip: null, query: logisticsQuery };
 const expenseOptions = { purpose: [], cash: [{value:"cash",label:"Основная касса"}], article: [{value:"material",label:"Материалы"}],
   currency: [{value:"BYN",label:"BYN"}], documentPresence: [], material: [], stockUnit: [] };
 const content = pathname === "/finance/accounts" ?
   <AccountsView accounts={accounts} canManageDefault={false} defaultCashAccount={{ cashAccountId: "cash", cashAccountName: "Основная касса" }} /> :
+  pathname === "/finance/income" ? <PageHeader title="Приходы организации" /> :
   pathname === "/finance/expenses" ?
     <div className="flex flex-col gap-4">
       <PageHeader title="Расходы организации" />
@@ -49,10 +64,10 @@ const content = pathname === "/finance/accounts" ?
       </ListParamsProvider>
     </div> :
   pathname === "/logistics" ?
-    <LogisticsWorkspace data={{ mode: "documents", total: 1, rows: [trip], initialTrip: null,
-      query: { query: "", page: 1, pageSize: 20, direction: "desc" } }} /> :
+    <LogisticsWorkspace data={logistics} /> :
     <FinanceNavigation telegram={telegram} showPayroll={allowPayroll} />;
 document.documentElement.style.setProperty("--tg-content-safe-area-inset-bottom", "16px");
+document.documentElement.style.setProperty("--tg-viewport-stable-height", "340px");
 if (new URLSearchParams(window.location.search).has("dark")) document.documentElement.classList.add("dark");
 const page = <PageNavigationProvider scope="demo" home="/finance">{content}</PageNavigationProvider>;
 createRoot(document.getElementById("root")).render(telegram
@@ -73,9 +88,20 @@ const boundaries = {
     export async function toggleCashAccount() { throw Error("Изменение недоступно в тесте"); }
     export async function setDefaultCashAccount() { throw Error("Изменение недоступно в тесте"); }
   `,
-  "@/server/logistics/actions": "export const createLogisticsTrip = async () => {}; export const updateLogisticsTrip = async () => {};",
+  "@/server/logistics/actions": `
+    export async function createLogisticsTrip(input) {
+      window.createdLogisticsTrip = input;
+      return { ok: true, tripId: "created-trip", revision: 1 };
+    }
+    export async function updateLogisticsTrip() { throw new Error("Редактирование недоступно в тесте"); }
+  `,
   "@/server/logistics/money-actions": "export const postLogisticsTrip = async () => {}; export const correctLogisticsTripPosting = async () => {};",
-  "@/server/logistics/delete-actions": "export const deleteLogisticsTrip = async () => {};",
+  "@/server/logistics/delete-actions": `
+    export async function deleteLogisticsTrip(input) {
+      window.deletedLogisticsTrip = input;
+      return { ok: true, tripId: input.tripId };
+    }
+  `,
   "@/server/list-preferences-actions": "export const saveListPreference = async () => ({ ok: true, value: null });",
 };
 
@@ -84,7 +110,9 @@ async function assertFits(page) {
 }
 
 async function assertDock(page) {
-  const dock = await page.getByRole("navigation", { name: "Рабочие разделы" }).boundingBox();
+  const navigation = page.getByRole("navigation", { name: "Рабочие разделы" });
+  await expect(navigation).toHaveCSS("position", "fixed");
+  const dock = await navigation.boundingBox();
   assert.ok(dock);
   assert.ok(Math.abs(dock.y + dock.height - page.viewportSize().height) < 2, "Панель остаётся у нижнего края");
   const button = await page.getByRole("navigation").getByRole("link", { name: "Логистика" }).boundingBox();
@@ -145,6 +173,10 @@ test("Mini App показывает полный финансовый вход, 
     }
     if (screenshotDirectory) await page.screenshot({ path: path.join(screenshotDirectory, "finance.png") });
 
+    await main.getByRole("link", { name: "Приходы", exact: true }).click();
+    await expect(main.getByRole("heading", { name: "Приходы организации" })).toBeVisible();
+    await assertDock(page);
+    await nav.getByRole("link", { name: "Финансы" }).click();
     await main.getByRole("link", { name: "Кассы", exact: true }).click();
     const card = main.locator('[data-slot="mobile-list-card"]').filter({ hasText: "Основная касса" });
     await expect(card).toBeVisible();
@@ -174,6 +206,7 @@ test("Mini App показывает полный финансовый вход, 
     await nav.getByRole("link", { name: "Логистика" }).click();
     await expect(nav.getByRole("link", { name: "Логистика" })).toHaveAttribute("aria-current", "page");
     await expect(main.getByRole("heading", { name: "Логистика", level: 1 })).toBeVisible();
+    await expect(main.getByRole("button", { name: "Новый рейс" })).toHaveCount(0);
     await expect(main.getByRole("textbox", { name: "Поиск по проекту или ТТН" })).toBeVisible();
     await assertFits(page);
     if (screenshotDirectory) await page.screenshot({ path: path.join(screenshotDirectory, "logistics.png") });
@@ -199,6 +232,32 @@ test("Mini App показывает полный финансовый вход, 
     await dateFilter.click();
     await expect(page.locator('[data-slot="popover-content"]')).toHaveCSS("opacity", "1");
     if (screenshotDirectory) await page.screenshot({ path: path.join(screenshotDirectory, "expense-filters.png") });
+
+    await page.goto(origin + "/logistics?role=admin");
+    await assertFits(page);
+    await main.getByRole("button", { name: "Новый рейс" }).click();
+    const shipment = page.getByRole("dialog", { name: "Новая отгрузка" });
+    await expect(shipment).toBeVisible();
+    await shipment.getByRole("button", { name: "Добавить проект…" }).click();
+    await page.getByRole("button", { name: "П-142 · Демонстрационный проект" }).click();
+    await shipment.getByRole("button", { name: "Изделие", exact: true }).click();
+    await shipment.getByText("Выберите позицию…", { exact: true }).click();
+    await page.locator('[data-slot="searchable-select-option"]').filter({ hasText: "П-142-1 · Стол" }).click();
+    await shipment.getByRole("checkbox", { name: "ТТН не требуется" }).click();
+    await shipment.getByRole("button", { name: "Сохранить рейс", exact: true }).click();
+    await expect.poll(() => page.evaluate(() => window.createdLogisticsTrip?.lines?.[0]?.productId))
+      .toBe("11111111-2222-4333-8111-111111111112");
+
+    if (await shipment.isVisible()) await shipment.getByRole("button", { name: "Закрыть", exact: true }).click();
+    await main.getByRole("button", { name: /Удалить рейс/ }).click();
+    const deletion = page.getByRole("dialog", { name: "Подтверждение удаления" });
+    await expect(deletion).toBeVisible();
+    assert.equal(await page.evaluate(() => window.deletedLogisticsTrip), undefined);
+    await deletion.getByRole("button", { name: "Удалить", exact: true }).click();
+    await expect.poll(() => page.evaluate(() => window.deletedLogisticsTrip?.expectedRevision)).toBe(1);
+    await page.goto(origin + "/logistics?role=procurement");
+    await expect(main.getByRole("button", { name: "Новый рейс" })).toBeVisible();
+    await expect(main.getByRole("button", { name: /Удалить рейс/ })).toHaveCount(0);
 
     await page.goto(origin + "/finance?role=procurement");
     await expect(main.getByRole("link", { name: "Зарплата" })).toHaveCount(0);

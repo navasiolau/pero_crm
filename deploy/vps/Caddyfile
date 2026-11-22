@@ -43,7 +43,6 @@ telegram-staging.peromebel.by {
 
 	@workspace {
 		path /finance /finance/* /logistics /logistics/* /notifications /api/finance/projects /api/finance/documents/* /api/logistics/documents/*
-		not path /api/logistics/documents/upload
 	}
 	handle @workspace {
 		import staging-telegram-upstream

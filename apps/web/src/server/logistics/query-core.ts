@@ -30,10 +30,10 @@ function documentsView(row: DocumentsReadRecord): LogisticsTripDocumentsView {
     projects: row.shares.map(share => share.project), documents: row.documents.map(logisticsDocumentView) };
 }
 
-export async function getLogisticsTripCore(actorId: string | null | undefined, id: string, transaction: LogisticsTransaction, documentsOnly = false) {
+export async function getLogisticsTripCore(actorId: string | null | undefined, id: string, transaction: LogisticsTransaction) {
   return transaction(async tx => {
     const actor = await requireLogisticsActor(actorId, tx, "documents");
-    if (!documentsOnly && canManageLogistics(actor.roles)) {
+    if (canManageLogistics(actor.roles)) {
       const row = await tx.logisticsTrip.findUnique({ where: { id }, include: logisticsTripReadInclude });
       return row && !row.deletedAt ? logisticsTripView(row) : null;
     }
@@ -43,10 +43,10 @@ export async function getLogisticsTripCore(actorId: string | null | undefined, i
 }
 
 export async function listLogisticsTripsCore(actorId: string | null | undefined, input: unknown,
-  transaction: LogisticsTransaction, requiredMode: "manage" | "documents" = "documents", documentsOnly = false) {
+  transaction: LogisticsTransaction, requiredMode: "manage" | "documents" = "documents") {
   return transaction(async tx => {
     const actor = await requireLogisticsActor(actorId, tx, requiredMode);
-    const query = logisticsTripListSchema.parse(input ?? {}), manage = !documentsOnly && canManageLogistics(actor.roles);
+    const query = logisticsTripListSchema.parse(input ?? {}), manage = canManageLogistics(actor.roles);
     const search: Prisma.LogisticsTripWhereInput[] = [
       { id: { contains: query.query, mode: "insensitive" } },
       { shares: { some: { removedAt: null, project: { number: { contains: query.query, mode: "insensitive" } } } } },
