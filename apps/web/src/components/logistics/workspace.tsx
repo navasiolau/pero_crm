@@ -116,13 +116,13 @@ export function LogisticsWorkspace({ data }: { data: LogisticsWorkspaceData }) {
       )}
       {data.mode === "manage" && data.budget && <BudgetSummary budget={data.budget} />}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-      <form className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4" onSubmit={event => { event.preventDefault(); if (dateFrom && dateTo && dateFrom > dateTo) { setError("Дата начала должна быть не позже даты окончания"); return; } setError(""); change({ q: query, projectId: projectId ?? (projectFilter || undefined), dateFrom: dateFrom || undefined, dateTo: dateTo || undefined }); }}>
+      <form data-slot="logistics-filters" className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4" onSubmit={event => { event.preventDefault(); if (dateFrom && dateTo && dateFrom > dateTo) { setError("Дата начала должна быть не позже даты окончания"); return; } setError(""); change({ q: query, projectId: projectId ?? (projectFilter || undefined), dateFrom: dateFrom || undefined, dateTo: dateTo || undefined }); }}>
         <label className="min-w-0 space-y-1 text-sm">Поиск по проекту или ТТН<Input value={query} maxLength={200} onChange={event => setQuery(event.target.value)} placeholder="Номер проекта, ТТН или рейса…" /></label>
         {data.mode === "manage" && !projectId && <label className="min-w-0 space-y-1 text-sm">Проект<SearchableSelect value={projectFilter} allowClear
           options={data.options.projects.map(project => ({ value: project.id, label: project.number + " · " + project.title }))}
           onChange={setProjectFilter} placeholder="Все проекты" /></label>}
-        <label className="space-y-1 text-sm">Дата с<Input type="date" value={dateFrom} onChange={event => setDateFrom(event.target.value)} /></label>
-        <label className="space-y-1 text-sm">Дата по<Input type="date" value={dateTo} min={dateFrom || undefined} onChange={event => setDateTo(event.target.value)} /></label>
+        <label className="min-w-0 space-y-1 text-sm">Дата с<Input type="date" value={dateFrom} onChange={event => setDateFrom(event.target.value)} /></label>
+        <label className="min-w-0 space-y-1 text-sm">Дата по<Input type="date" value={dateTo} min={dateFrom || undefined} onChange={event => setDateTo(event.target.value)} /></label>
         <Button type="submit" variant="outline" className="w-fit"><Search className="size-4" />Найти</Button>
       </form>
 
@@ -142,7 +142,7 @@ export function LogisticsWorkspace({ data }: { data: LogisticsWorkspaceData }) {
               <p className="text-xs text-muted-foreground">{tripState(row)}</p>
             </>}
             <p className="text-sm">{row.ttnNotRequired ? "ТТН не требуется · " : "ТТН: "}{row.documents.length} файл(ов)</p>
-            <Button type="button" variant="outline" size="sm" onClick={() => { setCreating(false); setSelected(row); }}>{manage ? "Открыть рейс" : "Открыть ТТН"}</Button>
+            <Button data-open-logistics-trip="" type="button" variant="outline" size="sm" onClick={() => { setCreating(false); setSelected(row); }}>{manage ? "Открыть рейс" : "Открыть ТТН"}</Button>
             {data.mode === "manage" && data.canDelete && row.mode === "manage" && <LogisticsDeleteButton trip={row} onDeleted={() => deleted(row.id)} />}
           </div>
         )} />

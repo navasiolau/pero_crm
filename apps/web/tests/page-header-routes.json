@@ -4,7 +4,7 @@
   "/changelog": {"back": "/"},
   "/clients": {"back": "/", "views": ["clients/clients-view"]},
   "/counterparties": {"back": "/", "views": ["counterparties/counterparties-view"]},
-  "/finance": {"back": "/"},
+  "/finance": {"views": ["@/components/finance-navigation"], "back": "/"},
   "/finance/accounts": {"back": "/finance", "views": ["finance/accounts/accounts-view"]},
   "/finance/accounts/report": {"back": "/finance/accounts", "views": ["@/components/cash-statement-view"]},
   "/finance/advances": {"back": "/finance", "views": ["advances/view"]},

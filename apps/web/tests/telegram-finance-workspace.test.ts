@@ -39,9 +39,9 @@ test("grant is tamper-evident and route scope excludes organizational and person
   assert.equal(readFinanceGrant(cookie, secret + "x", now), null);
   assert.equal(readFinanceGrant(cookie.replace(/^./, "b"), secret, now), null);
   for (const path of ["/finance", "/finance/projects/205", "/finance/advances", "/finance/payroll/export", "/api/finance/documents/upload",
-    "/api/finance/documents/d1", "/api/logistics/documents/d2", "/logistics/t1", "/notifications"]) assert.equal(isTelegramFinancePath(path), true, path);
+    "/api/finance/documents/d1", "/api/logistics/documents/d2", "/logistics/t1"]) assert.equal(isTelegramFinancePath(path), true, path);
   for (const path of ["/settings", "/payroll", "/projects/205", "/warehouse", "/finance-settings", "/finance/payroll/other",
-    "/api/v1/bot/payments", "/api/files/f1", "/api/logistics/documents/upload", "/api/logistics/documents/upload/x", "/plan", "/api/calendar"]) assert.equal(isTelegramFinancePath(path), false, path);
+    "/api/v1/bot/payments", "/api/files/f1", "/api/logistics/documents/upload", "/api/logistics/documents/upload/x", "/plan", "/api/calendar", "/notifications"]) assert.equal(isTelegramFinancePath(path), false, path);
 });
 
 const require = createRequire(import.meta.url);
@@ -141,7 +141,7 @@ test("the staging Mini App origin requires Telegram authentication for pages, ac
     const response = await middleware(middlewareRequest(path, "", method, true), event);
     assert.equal(response?.status, 401);
   }
-  for (const path of ["/finance/payroll", "/finance/payroll/export", "/finance/unknown"]) {
+  for (const path of ["/finance/payroll", "/finance/payroll/export", "/finance/unknown", "/notifications"]) {
     const response = await middleware(middlewareRequest(path, cookie, "GET", true), event);
     assert.equal(response?.status, 403);
     assert.equal(await response?.text(), deniedMessage);
