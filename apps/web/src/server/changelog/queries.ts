@@ -4,6 +4,7 @@ import {Prisma} from '@prisma/client';
 import {normalizeJournalQuery,normalizeJournalScope,type JournalQueryInput} from './query-contract';
 import type {JournalScope} from './contract';
 import {createJournalReadStore} from './sql-store';
+import {journalSessionEventWhere} from './session-events';
 import {readJournalPage,readJournalDetail,readJournalOptions} from './reader-core';
 
 /** Count, legacy fallback и indexed rows видят один snapshot даже во время backfill. */
@@ -39,6 +40,7 @@ export async function listGlobalChangeLog({ actor, entity, from, to }: GlobalCha
   const where = {
     // Durable receipt хранится в БД; интерфейс показывает один прежний business audit.
     NOT: { OR: [
+      journalSessionEventWhere,
       { entity: "task", action: "task.status.request", id: { startsWith: "task-status:" } },
       { entity: "task", action: "task.create.request", id: { startsWith: "task-create:" } },
       { entity: "product", action: "inline.receipt", id: { startsWith: "product-inline:" } },

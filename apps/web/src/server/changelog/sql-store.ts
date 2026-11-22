@@ -4,8 +4,14 @@ import {journalEntityLabel} from './labels';
 import {escapeJournalLike,JOURNAL_SYSTEM_ACTOR,normalizeJournalQuery,type JournalQuery,type JournalListRow} from './query-contract';
 import type {JournalReadStore,JournalOptionRecord} from './reader-core';
 import {resolveJournalEntries,type JournalStoredEntry} from './resolver';
+import {journalSessionEventWhere} from './session-events';
 
 export type JournalReadDb=Pick<Prisma.TransactionClient,'$queryRaw'>;
+// Историческое presentation может считать вход или выход обычным событием.
+const withoutSessionEventsSql=Prisma.sql`NOT (
+ c.entity IN (${Prisma.join(journalSessionEventWhere.entity.in)})
+ AND c.action IN (${Prisma.join(journalSessionEventWhere.action.in)})
+)`;
 const field=(path:string)=>Prisma.raw(`c.presentation #>> '{${path}}'`);
 // Один JSONPath вызов распаковывает TOAST один раз; проверка остаётся полной и fail-closed.
 const textField=(path:string)=>`exists(${path}) && ${path}.type() == "string"`;
@@ -35,7 +41,7 @@ function dateSql(query:JournalQuery):Prisma.Sql[]{
 }
 
 export function journalPreparedWhere(query:JournalQuery):Prisma.Sql{
- const conditions=[JOURNAL_PREPARED_SQL,Prisma.sql`c.presentation->>'kind'='event'`,journalScopeSql(query.scope),...dateSql(query)];
+ const conditions=[withoutSessionEventsSql,JOURNAL_PREPARED_SQL,Prisma.sql`c.presentation->>'kind'='event'`,journalScopeSql(query.scope),...dateSql(query)];
  if(query.actorId)conditions.push(query.actorId===JOURNAL_SYSTEM_ACTOR?Prisma.sql`${field('actor,type')}='system'`:Prisma.sql`(${field('actor,type')}='user' AND ${field('actor,id')}=${query.actorId})`);
  if(query.entity)conditions.push(Prisma.sql`${field('entity,type')}=${query.entity}`);
  if(query.q)conditions.push(searchSql(query.q,Prisma.sql`c.id`));
@@ -57,8 +63,8 @@ function searchMatchesSql(query:string):Prisma.Sql{
 const rawColumns=Prisma.sql`c.id,c."actorType",c."actorId",c."actorName",c.entity,c."entityId",c.action,c.field,c."oldValue",c."newValue",c.source,c."createdAt",c.presentation,c."searchText",c."reversesId"`;
 type PageSnapshot={total:bigint;offset:bigint;entries:JournalListRow[];pendingIds:string[]};
 function classification(query:JournalQuery){
- const dates=dateSql(query);
- return Prisma.sql`classified AS MATERIALIZED (SELECT c.id,c."createdAt",${readyKind} AS kind FROM "ChangeLog" c ${dates.length?Prisma.sql`WHERE ${Prisma.join(dates,' AND ')}`:Prisma.empty})`;
+ const conditions=[withoutSessionEventsSql,...dateSql(query)];
+ return Prisma.sql`classified AS MATERIALIZED (SELECT c.id,c."createdAt",${readyKind} AS kind FROM "ChangeLog" c WHERE ${Prisma.join(conditions,' AND ')})`;
 }
 
 /** Одна валидация всей истории и только одна SQL-страница; большие payload не материализуются. */
@@ -111,7 +117,7 @@ export function createJournalReadStore(db:JournalReadDb):JournalReadStore{
     const rows=await db.$queryRaw<JournalStoredEntry[]>(Prisma.sql`SELECT ${rawColumns} FROM "ChangeLog" c WHERE c.id IN (${Prisma.join(ids)}) ORDER BY c.id COLLATE "C" ASC`);
     return resolveJournalEntries(db,rows);
    }
-   const conditions=[Prisma.sql`NOT COALESCE(${JOURNAL_PREPARED_SQL},FALSE)`,...(afterId?[Prisma.sql`c.id>${afterId}`]:[]),...(query?dateSql(query):[])];
+   const conditions=[withoutSessionEventsSql,Prisma.sql`NOT COALESCE(${JOURNAL_PREPARED_SQL},FALSE)`,...(afterId?[Prisma.sql`c.id>${afterId}`]:[]),...(query?dateSql(query):[])];
    const rows=await db.$queryRaw<JournalStoredEntry[]>(Prisma.sql`SELECT ${rawColumns} FROM "ChangeLog" c WHERE ${Prisma.join(conditions,' AND ')} ORDER BY c.id ASC LIMIT ${limit}`);
    return resolveJournalEntries(db,rows);
   },
@@ -129,7 +135,7 @@ export function createJournalReadStore(db:JournalReadDb):JournalReadStore{
    return rows.map(row=>({...row,createdAt:row.createdAt.toISOString(),hasChanges:row.changeCount>0}));
   },
   async find(id){
-   const rows=await db.$queryRaw<JournalStoredEntry[]>(Prisma.sql`SELECT ${rawColumns} FROM "ChangeLog" c WHERE c.id=${id}`);
+   const rows=await db.$queryRaw<JournalStoredEntry[]>(Prisma.sql`SELECT ${rawColumns} FROM "ChangeLog" c WHERE c.id=${id} AND ${withoutSessionEventsSql}`);
    return (await resolveJournalEntries(db,rows))[0]??null;
   },
   async preparedOptions(scope){

@@ -5,6 +5,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import type { Prisma, PrismaClient, ProductStatus, ProjectStage, Role } from "@prisma/client";
 import type { DomainActor } from "../../src/server/actor";
+import { normalizeJournalQuery } from "../../src/server/changelog/query-contract";
+import { readJournalDetail, readJournalOptions, readJournalPage } from "../../src/server/changelog/reader-core";
+import { createJournalReadStore } from "../../src/server/changelog/sql-store";
+import { writeChangeLogInTransaction } from "../../src/server/changelog/writer";
 import { deliverPaymentEffects } from "../../src/server/payments/post-commit";
 import { guardedModuleCache } from "../helpers/guarded-module-cache";
 import { nativeOwnedIds, nativeSnapshot } from "../helpers/native-acceptance-snapshot";
@@ -324,6 +328,53 @@ test("counterparties/native-create-revision-CAS-audit-rollback", async () => fix
 test("journal/project-and-product-visibility-with-stable-numbers", async () => fixture.rollback(async (tx, rows) => {
   const { verifyCardVisibility } = await import("../helpers/native-card-visibility");
   await verifyCardVisibility(tx, rows);
+}));
+
+test("journal/historical-session-events-are-hidden-and-user-mutations-remain", async () => fixture.rollback(async (tx, rows) => {
+  const admin = await rows.user("journal-reader", ["ADMIN"]);
+  const historicalActorId = rows.id("historical-session-actor");
+  const marker = rows.id("historical-session-search");
+  const productScope = { kind: "product" as const, id: rows.id("historical-session-product") };
+  const historical = {
+    actorType: "user", actorId: historicalActorId, actorName: marker,
+    entity: "user", entityId: historicalActorId,
+  } as const;
+  const login = await writeChangeLogInTransaction(tx, { ...historical, id: rows.id("historical-login"), action: "login" },
+    { contexts: [{ ...productScope, label: "Изделие" }] });
+  const logout = await tx.changeLog.create({ data: { ...historical, id: rows.id("historical-logout"), action: "logout" } });
+  const alias = await writeChangeLogInTransaction(tx, { ...historical, id: rows.id("historical-alias"), entity: "session", action: "session.logout" });
+
+  const mutation = { actorType: "user", actorId: admin.id, actorName: admin.name, entity: "user", entityId: admin.id } as const;
+  const changed = await writeChangeLogInTransaction(tx, { ...mutation, id: rows.id("user-edit"), action: "update",
+    field: "name", oldValue: "Прежнее имя", newValue: "Новое имя" });
+  const revoked = await tx.changeLog.create({ data: { ...mutation, id: rows.id("user-revoke"), action: "revokeSessions",
+    field: "sessionVersion", oldValue: 1, newValue: 2 } });
+
+  const store = createJournalReadStore(tx);
+  const query = normalizeJournalQuery({ actorId: admin.id, entity: "user" });
+  const page = await readJournalPage(store, query);
+  assert.equal(page.total, 2);
+  const businessIds = [changed.id, revoked.id].sort();
+  assert.deepEqual(page.entries.map(entry => entry.id).sort(), businessIds);
+  for (const id of businessIds) assert.equal((await readJournalDetail(store, id, query.scope)).id, id);
+
+  const hiddenQuery = normalizeJournalQuery({ actorId: historicalActorId });
+  const hiddenIds = [login.id, logout.id, alias.id];
+  const directStore = createJournalReadStore(tx);
+  assert.equal(await directStore.preparedCount(hiddenQuery), 0);
+  assert.deepEqual(await directStore.preparedRows(hiddenQuery, 20), []);
+  assert.equal((await readJournalPage(store, hiddenQuery)).total, 0);
+  assert.equal((await readJournalPage(store, normalizeJournalQuery({ q: marker }))).total, 0);
+  for (const id of hiddenIds) {
+    assert.equal((await readJournalPage(store, normalizeJournalQuery({ q: id }))).total, 0);
+    await assert.rejects(() => readJournalDetail(store, id, hiddenQuery.scope), /не найдена/);
+  }
+  assert.equal((await readJournalPage(store, normalizeJournalQuery({ scope: productScope }))).total, 0);
+  await assert.rejects(() => readJournalDetail(store, login.id, productScope), /не найдена/);
+  assert.deepEqual((await readJournalOptions(store, productScope)).entities, []);
+  assert.ok(!(await readJournalOptions(store, hiddenQuery.scope)).users.some(option => option.id === historicalActorId));
+  assert.deepEqual(await run(actorOf(admin), tx, () => changelog.listGlobalChangeLog({ actor: historicalActorId })), []);
+  assert.equal(await tx.changeLog.count({ where: { id: { in: hiddenIds } } }), hiddenIds.length);
 }));
 
 test("journal/native-title-reversal-ABA-and-audit-atomicity", async () => fixture.rollback(async (tx, rows) => {

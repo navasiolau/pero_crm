@@ -223,6 +223,22 @@ test("security.routes: credentials, Bearer, Telegram и команды чере�
       const failed = await f.login(email, value); assert.equal(new URL(failed.url).searchParams.get("error"), "CredentialsSignin");
       assert.equal((await session(failed.cookie)).body, null);
     }
+    const csrf = await f.request("/api/auth/csrf", undefined, { headers: { cookie: logged.cookie } });
+    assert.equal(csrf.status, 200);
+    const { csrfToken } = await csrf.json() as { csrfToken: string };
+    assert.equal(typeof csrfToken, "string");
+    const logout = await f.request("/api/auth/signout", undefined, {
+      method: "POST",
+      headers: { cookie: logged.cookie, "Content-Type": "application/x-www-form-urlencoded", Origin: f.target.baseUrl },
+      body: new URLSearchParams({ csrfToken, callbackUrl: `${f.target.baseUrl}/login` }),
+    });
+    assert.equal(logout.status, 302);
+    assert.equal(new URL(logout.headers.get("location")!, f.target.baseUrl).pathname, "/login");
+    assert.ok(logout.headers.getSetCookie().some(value => /authjs\.session-token=;.*Max-Age=0/i.test(value)));
+    assert.equal(await f.db.changeLog.count({ where: { OR: [
+      { actorId: { in: [active.id, inactive.id] } },
+      { entity: "user", entityId: { in: [active.id, inactive.id] } },
+    ] } }), 0);
   });
   await t.test("credentials/revoke: реальные password/roles/email/active/manual записи отзывают выданную cookie", async () => {
     const independent = await passwordUser("independent"), unaffected = await f.login(independent.email, password);

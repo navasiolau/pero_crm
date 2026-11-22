@@ -14,8 +14,6 @@ declare module "next-auth" {
     id: string;
     roles: Role[];
     sessionVersion: number;
-    // Только внутренний callback успешного входа; JWT и Session это поле не копируют.
-    auditLoginId?: string;
   }
 }
 
