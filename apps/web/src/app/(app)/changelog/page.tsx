@@ -22,7 +22,7 @@ export default async function ChangelogPage({ searchParams }: {
   return <div className="flex min-w-0 flex-col gap-6">
     <PageHeader
       title="Журнал изменений"
-      description="История изменений и важных операций в CRM. Нажмите строку, чтобы открыть событие целиком."
+      description="Нажмите строку, чтобы посмотреть, кто и какие данные изменил."
     />
     <Journal initialQuery={initialQuery}/>
   </div>;

@@ -7,7 +7,6 @@ import { requestTelegramLinkInTransaction, confirmTelegramLinkInTransaction, unl
 import { createApiTokenInTransaction, revokeApiTokenInTransaction, savePluginSettingsInTransaction, togglePluginInTransaction } from "../../src/server/plugins/mutation-core";
 import { setNotificationPreferenceInTransaction } from "../../src/server/notifications/preference-core";
 import { createCounterpartyInTransaction, updateCounterpartyInTransaction } from "../../src/server/counterparties/core";
-import { recordAuthenticationEvent } from "../../src/server/auth/journal-events";
 import { parseJournalPresentation } from "../../src/server/changelog/presentation";
 
 export class JournalAccountNativeRollback extends Error {
@@ -23,7 +22,7 @@ export async function exerciseJournalAccountNative(tx: Prisma.TransactionClient,
   if (identity?.database !== input.expectedDatabase || identity.readOnly !== "off") throw new Error("JOURNAL228_NATIVE_TARGET_MISMATCH");
   const prefix = `qa-journal228-${input.runId}`, actorId = `${prefix}-admin`, pluginId = `${prefix}-plugin`;
   if (await tx.user.count({ where: { OR: [{ id: actorId }, { email: { startsWith: prefix } }] } }) || await tx.plugin.findUnique({ where: { id: pluginId } }) ||
-      await tx.counterparty.count({ where: { company: { startsWith: prefix } } }) || await tx.changeLog.count({ where: { id: { in: [`auth-login:${input.runId}`, `auth-logout:${input.runId}`] } } }))
+      await tx.counterparty.count({ where: { company: { startsWith: prefix } } }))
     throw new Error("JOURNAL228_NATIVE_OWNERSHIP_CONFLICT");
   const fixtureHash = `fixture-hash-${input.runId}`, token = `pero_fixture_${input.runId.replaceAll("-", "")}`, linkCode = input.runId.replaceAll("-", "").slice(0, 24);
   const digest = createHash("sha256").update("telegram-link:").update(linkCode).digest("hex");
@@ -73,12 +72,7 @@ export async function exerciseJournalAccountNative(tx: Prisma.TransactionClient,
   assert.ok((await updateCounterpartyInTransaction(tx, administrator, counterparty.item.id, { type: "SUPPLIER", company: prefix, phone: "001", comment: "Изменено" }, counterparty.item.revision)).ok);
   await setNotificationPreferenceInTransaction(tx, administrator, "task.assigned", false, "Задачи");
   await setNotificationPreferenceInTransaction(tx, administrator, "plan.reminder", false, "Личный план");
-  await recordAuthenticationEvent(tx, { action: "login", operationId: input.runId, userId: actorId, name: actor.name });
-  await recordAuthenticationEvent(tx, { action: "login", operationId: input.runId, userId: actorId, name: actor.name });
-  await recordAuthenticationEvent(tx, { action: "logout", operationId: input.runId, userId: actorId, name: actor.name });
   const entries = await tx.changeLog.findMany({ where: { OR: [{ actorId: { in: [actorId, employeeId] } }, { entity: "user", entityId: employeeId }, { entity: "apiToken", entityId: employeeToken.id }] }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
-  assert.equal(entries.filter(entry => entry.action === "login").length, 1);
-  assert.equal(entries.filter(entry => entry.action === "logout").length, 1);
   assert.equal(entries.filter(entry => entry.entity === "apiToken" && entry.entityId === api.id && entry.action === "revoke").length, 1);
   assert.equal(entries.filter(entry => entry.entity === "apiToken" && entry.entityId === employeeToken.id && entry.action === "revoke" && entry.actorType === "system").length, 1);
   assert.equal(entries.filter(entry => entry.entity === "user" && entry.entityId === employeeId && entry.action === "revokeSessions" && entry.actorType === "system").length, 1);
@@ -89,5 +83,5 @@ export async function exerciseJournalAccountNative(tx: Prisma.TransactionClient,
   for (const key of ["name", "roles", "phone", "telegram", "position", "payScheme", "payPercent"]) assert.ok(userEdit.changes.some(change => change.path === key), key);
   assert.equal(await tx.domainEvent.count({ where: { actor: actorId, type: "plugin.toggled" } }), 1);
   // Root ловит sentinel только СНАРУЖИ prisma.$transaction и затем сверяет сохранность всей БД.
-  throw new JournalAccountNativeRollback({ runId: input.runId, assertions: 27, eventCount: entries.length, eventIds: entries.map(entry => entry.id) });
+  throw new JournalAccountNativeRollback({ runId: input.runId, assertions: 25, eventCount: entries.length, eventIds: entries.map(entry => entry.id) });
 }

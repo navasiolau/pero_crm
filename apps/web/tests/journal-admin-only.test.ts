@@ -40,6 +40,10 @@ test("real global Journal query and page reject non-admin before reading audit r
   assert.deepEqual(await listGlobalChangeLog({ actor: "Ivan", entity: "task", from: "2026-10-01", to: "2026-10-03" }), []);
   assert.equal(reads, 1);
   assert.deepEqual(lastInput, { where: { NOT: { OR: [
+    {
+      entity: { in: ["user", "authentication", "session"] },
+      action: { in: ["login", "logout", "auth.login", "auth.logout", "session.login", "session.logout", "signIn", "signOut"] },
+    },
     { entity: "task", action: "task.status.request", id: { startsWith: "task-status:" } },
     { entity: "task", action: "task.create.request", id: { startsWith: "task-create:" } },
     { entity: "product", action: "inline.receipt", id: { startsWith: "product-inline:" } },
