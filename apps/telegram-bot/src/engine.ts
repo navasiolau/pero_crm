@@ -1,6 +1,7 @@
 import { config } from "./config";
+import { BOT_COMMAND, canonicalBotCommand } from "./commands";
 import { pendingFinanceCommand, submitFinanceCommand } from "./finance-checkpoint";
-import { dialogChoices, dialogChoice } from "./dialog-choices";
+import { CANCEL_BUTTON, dialogChoices, dialogChoice, isTestChoice } from "./dialog-choices";
 import {randomUUID} from "node:crypto";
 import { crm, CrmError, type BotAccess, type ProjectRef, type ProjectBaseline } from "./crm";
 import { tg, TgError, type InlineButton, type TgCallbackQuery, type TgMessage, type TgUpdate } from "./tg";
@@ -83,11 +84,16 @@ type Dialog =
       clientMutationId?: string; submittedValue?: string;
     };
 
+type DraftPrompt = { id: string; step: string; state: Dialog; text: string; buttons: InlineButton[][] };
+type DraftHistory = { current: DraftPrompt; previous: DraftPrompt[] };
+type SentButtons = { actions: Set<string>; draftPromptId?: string };
+
 const stageMenus=new Map<string,{projectId:string;projectNumber:string;expectedStage:string;token:string;mutations:Record<string,string>}>();
 const financeProjectMenus = new Map<number, { token: string; projects: ProjectRef[] }>();
 const dialogs = new Map<string, Dialog>();
+const draftHistory = new Map<string, DraftHistory>();
 const observedActor = new Map<string, { userId: string; binding?: string }>();
-const callbackMessages = new Map<string, Map<number, Set<string>>>();
+const callbackMessages = new Map<string, Map<number, SentButtons>>();
 const FINANCE_CALLBACK_ACTIONS = new Set(["payin", "payout", "payproj", "paygeneral", "paylist", "payoptions", "cur", "cash", "art", "nocomment", "payok", "docretry", "doccontinue", "docexclude", "sp"]);
 const PROJECT_CALLBACK_ACTIONS = new Set(["proj", "stage", "st", "edit", "ed", "mgr", "cli", "npc"]);
 const DIALOG_ACCESS = {
@@ -99,8 +105,10 @@ function getDialog(chatId: number): Dialog | undefined {
   return dialogs.get(String(chatId));
 }
 function setDialog(chatId: number, dialog: Dialog | null): void {
-  if (dialog) dialogs.set(String(chatId), dialog);
-  else dialogs.delete(String(chatId));
+  const key = String(chatId);
+  if (dialog !== dialogs.get(key)) draftHistory.delete(key);
+  if (dialog) dialogs.set(key, dialog);
+  else dialogs.delete(key);
 }
 
 async function getSession(chatId: string): Promise<Session | null> {
@@ -125,25 +133,51 @@ function dropSession(chatId: string): void {
   observedActor.delete(chatId);
   callbackMessages.delete(chatId);
   dialogs.delete(chatId);
+  draftHistory.delete(chatId);
   financeProjectMenus.delete(Number(chatId));
 }
 
-const CANCEL_BUTTON: InlineButton = { text: "❌ Отмена", callback_data: "cancel" };
+function nextDraftPrompt(chatId: string, dialog: Dialog, text: string, buttons: InlineButton[][]): DraftHistory {
+  const step = dialog.kind + ":" + ("step" in dialog ? dialog.step : dialog.field);
+  const state = structuredClone(dialog);
+  if ("busy" in state) state.busy = false;
+  const current = { id: randomUUID(), step, state, text, buttons };
+  const history = draftHistory.get(chatId);
+  if (!history) return { current, previous: [] };
+  if (history.current.step === step) return { current, previous: history.previous };
+  // Выход из ручной даты или курса завершает вложенный шаг и возвращает сводку.
+  if (history.previous.at(-1)?.step === step) return { current, previous: history.previous.slice(0, -1) };
+  return { current, previous: [...history.previous.slice(-31), history.current] };
+}
 
 async function reply(
   chatId: number,
   text: string,
   buttons?: InlineButton[][],
 ): Promise<void> {
+  let keyboard = buttons?.map(row => row.filter(button => !isTestChoice(button.text))).filter(row => row.length > 0);
+  const key = String(chatId);
+  const observed = observedActor.get(key);
+  const dialog = getDialog(chatId);
+  const history = dialog && keyboard?.some(row => row.some(button => button.callback_data === CANCEL_BUTTON.callback_data))
+    ? nextDraftPrompt(key, dialog, text, keyboard) : undefined;
+  if (history && keyboard) {
+    const { current, previous } = history;
+    keyboard = keyboard.map(row => row.filter(button => button.callback_data !== CANCEL_BUTTON.callback_data)).filter(row => row.length > 0);
+    keyboard.push([
+      ...(previous.length ? [{ text: "← Назад", callback_data: `draftback:${current.id}` }] : []),
+      { text: "Отменить всё", callback_data: `draftstop:${current.id}` },
+    ]);
+  }
   try {
-    const key = String(chatId);
-    const observed = observedActor.get(key);
-    const sent = await tg.sendMessage(chatId, text, buttons);
-    if (observed?.binding && buttons && observedActor.get(key) === observed) {
-      const callbacks = buttons.flat().flatMap(button => button.callback_data ? [button.callback_data] : []);
+    const sent = await tg.sendMessage(chatId, text, keyboard);
+    if (observedActor.get(key) !== observed) return;
+    if (history && dialog === getDialog(chatId)) draftHistory.set(key, history);
+    if (observed?.binding && keyboard) {
+      const callbacks = keyboard.flat().flatMap(button => button.callback_data ? [button.callback_data] : []);
       if (callbacks.length) {
-        const messages = callbackMessages.get(key) ?? new Map<number, Set<string>>();
-        messages.set(sent.message_id, new Set(callbacks));
+        const messages = callbackMessages.get(key) ?? new Map<number, SentButtons>();
+        messages.set(sent.message_id, { actions: new Set(callbacks), draftPromptId: history?.current.id });
         if (messages.size > 100) messages.delete(messages.keys().next().value!);
         callbackMessages.set(key, messages);
       }
@@ -151,7 +185,7 @@ async function reply(
   } catch (e) {
     // Клавиатура не прошла (например, битая кнопка) — повторяем без неё,
     // чтобы пользователь не оставался без ответа
-    if (buttons && e instanceof TgError) {
+    if (keyboard?.length && e instanceof TgError) {
       try {
         await tg.sendMessage(chatId, text);
         return;
@@ -220,7 +254,7 @@ export async function handleUpdate(update: TgUpdate): Promise<void> {
       }
       return;
     }
-    await reply(chatId, "Команды бота — /help");
+    await reply(chatId, `Команды бота — ${BOT_COMMAND.help}`);
   } catch (error) {
     console.error("[engine] сообщение:", error);
     await reply(chatId, "❌ Ошибка, попробуйте ещё раз");
@@ -233,7 +267,7 @@ function parseCommand(text: string): { cmd: string; args: string[] } {
   const cmd = first.startsWith("/")
     ? first.replace(/@[\w_]+$/, "").toLowerCase()
     : "";
-  return { cmd, args: parts.slice(1) };
+  return { cmd: canonicalBotCommand(cmd), args: parts.slice(1) };
 }
 
 // ─── Привязка / отвязка ──────────────────────────────────────────────────────
@@ -251,7 +285,7 @@ async function handleLinkCode(
     return;
   }
   const who = `${result.user.name} · ${rolesLabel(result.user.roles)}`;
-  await reply(chatId, `✅ Привязано: ${who}\n\nСписок команд — /help`, financeWorkspaceButtons(result.user.access));
+  await reply(chatId, `✅ Привязано: ${who}\n\nСписок команд — ${BOT_COMMAND.help}`, financeWorkspaceButtons(result.user.access));
 }
 
 // ─── Команды ─────────────────────────────────────────────────────────────────
@@ -263,12 +297,11 @@ async function handleCommand(
   args: string[],
 ): Promise<void> {
   switch (cmd) {
-    case "/повтор":
-    case "/retry": {
+    case BOT_COMMAND.verifyOperation: {
       if (!session.access.finance) return reply(chatId, session.access.deniedMessage);
       const pending = pendingFinanceCommand(chatId, session.userId);
       if (!pending) {
-        await reply(chatId, "Нет ожидающей подтверждения операции для вашего аккаунта.");
+        await reply(chatId, "Нет операций, которые нужно проверить.");
         return;
       }
       try {
@@ -276,14 +309,17 @@ async function handleCommand(
         if (result.ok) setDialog(chatId, null);
         await reply(chatId, result.ok ? "✅ Операция подтверждена в CRM." : `❌ ${result.error ?? "Результат неизвестен"}`);
       } catch {
-        await reply(chatId, "Подтверждение недоступно. Позже повторите /повтор.");
+        await reply(chatId, `Подтверждение недоступно. Позже используйте ${BOT_COMMAND.verifyOperation}.`);
       }
       return;
     }
-    case "/выдача": case "/stockout": case "/возврат": case "/stockreturn": case "/инвприход": case "/stockinventory": {
+    case BOT_COMMAND.stockIssue:
+    case BOT_COMMAND.stockReturn:
+    case BOT_COMMAND.inventoryReceipt: {
       if (!session.access.warehouse) return reply(chatId, session.access.deniedMessage);
-      const kind=["/выдача","/stockout"].includes(cmd)?"EXPENSE":["/возврат","/stockreturn"].includes(cmd)?"RETURN":"INCOME";
-      await startStockMovement({reply,getDialog,setDialog},chatId,kind);return;
+      const kind = cmd === BOT_COMMAND.stockIssue ? "EXPENSE" : cmd === BOT_COMMAND.stockReturn ? "RETURN" : "INCOME";
+      await startStockMovement({ reply, getDialog, setDialog }, chatId, kind);
+      return;
     }
     case "/закупка":
     case "/stockin": {
@@ -299,12 +335,11 @@ async function handleCommand(
       return;
     }
     case "/start":
-    case "/help": {
+    case BOT_COMMAND.help: {
       await reply(chatId, helpText(session.access), financeWorkspaceButtons(session.access));
       return;
     }
-    case "/новый":
-    case "/new": {
+    case BOT_COMMAND.newProject: {
       if (!session.access.projects) return reply(chatId, session.access.deniedMessage);
       setDialog(chatId, {
         kind: "newProject",
@@ -373,7 +408,7 @@ async function handleCommand(
       return;
     }
     default:
-      await reply(chatId, "Неизвестная команда. Список — /help");
+      await reply(chatId, `Неизвестная команда. Список — ${BOT_COMMAND.help}`);
   }
 }
 
@@ -383,9 +418,9 @@ function financeWorkspaceButtons(access: BotAccess): InlineButton[][] | undefine
 }
 
 function helpText(access: BotAccess): string {
-  const lines = ["Команды бота:"];
+  const lines = ["Команды бота"];
   if (access.projects) lines.push(
-    "/новый — создать проект",
+    `${BOT_COMMAND.newProject} — создать проект`,
     "/проект <номер> — карточка проекта (этап, реквизиты, платежи)",
     "/проекты — последние проекты",
   );
@@ -395,11 +430,15 @@ function helpText(access: BotAccess): string {
       "/приход [номер] [сумма] — приход по проекту или организации",
       "/расход [номер] [сумма] — расход по проекту или организации",
       "/закупка — приход материала с оплатой из кассы",
-      "/повтор — проверить незавершённое подтверждение",
+      `${BOT_COMMAND.verifyOperation} — проверить, сохранилась ли операция`,
     );
   }
   if (access.finance && !access.projects) lines.push("/проекты [поиск] — найти проект для платежа");
-  if (access.warehouse) lines.push("/выдача — выдать материал на изделие", "/возврат — вернуть материал по исходной выдаче", "/инвприход — инвентарный приход без кассы");
+  if (access.warehouse) lines.push(
+    `${BOT_COMMAND.stockIssue} — выдать материал со склада на изделие`,
+    `${BOT_COMMAND.stockReturn} — вернуть ранее выданный материал`,
+    `${BOT_COMMAND.inventoryReceipt} — принять материал без оплаты из кассы`,
+  );
   lines.push("Отвязать бота — в CRM: меню профиля → Telegram");
   return lines.join("\n");
 }
@@ -494,20 +533,20 @@ async function newProjectText(
       const result = await crm.directory(session.userId, "clients", text);
       const items = result.items ?? [];
       if (items.length === 0) {
-        await reply(chatId, "Клиент не найден — уточните запрос:");
+        await reply(chatId, "Клиент не найден — уточните запрос:", [[CANCEL_BUTTON]]);
         return;
       }
       setDialog(chatId, dialog); // выбор по кнопкам cli:<id>
       await reply(
         chatId,
         "Найденные клиенты:",
-        buttonsRow(
+        [...buttonsRow(
           items.map((item) => ({
             text: item.label,
             callback_data: `cli:${item.id}`,
           })),
           1,
-        ),
+        ), [CANCEL_BUTTON]],
       );
       return;
     }
@@ -521,7 +560,7 @@ async function newProjectText(
 async function blockPendingFinance(chatId: number, session: Session) {
   const pending = pendingFinanceCommand(chatId, session.userId);
   if (!pending) return false;
-  await reply(chatId, "Сначала проверьте незавершённую операцию командой /повтор.");
+  await reply(chatId, `Сначала проверьте незавершённую операцию командой ${BOT_COMMAND.verifyOperation}.`);
   return true;
 }
 
@@ -606,14 +645,14 @@ async function paymentText(
   }
   if (dialog.step === "paidAt") {
     if (!/^(?:\d{4}-\d{2}-\d{2}|авто)$/i.test(text)) {
-      await reply(chatId, "Введите дату в формате ГГГГ-ММ-ДД или «авто».");
+      await reply(chatId, "Введите дату в формате ГГГГ-ММ-ДД или «авто».", [[CANCEL_BUTTON]]);
       return;
     }
     const automatic = text.toLowerCase() === "авто";
     if (!automatic) {
       const date = new Date(text);
       if (!Number.isFinite(date.valueOf()) || date.toISOString().slice(0, 10) !== text) {
-        await reply(chatId, "Проверьте календарную дату.");
+        await reply(chatId, "Проверьте календарную дату.", [[CANCEL_BUTTON]]);
         return;
       }
     }
@@ -625,7 +664,7 @@ async function paymentText(
     const automatic = text.toLowerCase() === "авто";
     const rate = Number(text.replace(",", "."));
     if (!automatic && (!/^\d+(?:[.,]\d+)?$/.test(text) || !Number.isFinite(rate) || rate <= 0)) {
-      await reply(chatId, "Введите положительный курс в BYN или «авто».");
+      await reply(chatId, "Введите положительный курс в BYN или «авто».", [[CANCEL_BUTTON]]);
       return;
     }
     dialog.rate = automatic ? undefined : rate;
@@ -776,7 +815,7 @@ async function confirmPayment(
     ],
     [
       { text: "✅ Создать", callback_data: `payok:${dialog.clientMutationId}` },
-      { text: "❌ Отмена", callback_data: "cancel" },
+      CANCEL_BUTTON,
     ],
   ]);
 }
@@ -795,7 +834,7 @@ async function stageText(
       dialog.refusalReason = text;
       dialog.step = "refusalComment";
       setDialog(chatId, dialog);
-      await reply(chatId, "Комментарий к отказу («—» — пропустить):");
+      await reply(chatId, "Комментарий к отказу («—» — пропустить):", [[CANCEL_BUTTON]]);
       return;
     case "refusalComment": {
       const result = await crm.changeStage(session.userId, dialog.projectId, "REFUSED", {
@@ -878,8 +917,11 @@ async function handleCallback(query: TgCallbackQuery): Promise<void> {
   } catch {
     // не критично
   }
-  if (session.binding && !callbackMessages.get(String(chatId))?.get(query.message.message_id)?.has(data)) {
-    await reply(chatId, "Кнопка устарела. Откройте меню командой /help.");
+  const key = String(chatId);
+  const recorded = callbackMessages.get(key)?.get(query.message.message_id);
+  if (session.binding && (!recorded?.actions.has(data) ||
+      (recorded.draftPromptId && recorded.draftPromptId !== draftHistory.get(key)?.current.id))) {
+    await reply(chatId, `Кнопка устарела. Используйте последние кнопки или откройте ${BOT_COMMAND.help}.`);
     return;
   }
   try {
@@ -892,6 +934,27 @@ async function handleCallback(query: TgCallbackQuery): Promise<void> {
       await reply(chatId, "❌ Внутренняя ошибка, попробуйте ещё раз");
     }
   }
+}
+
+async function navigateDraft(chatId: number, session: Session, promptId: string, discard: boolean) {
+  const key = String(chatId);
+  const dialog = getDialog(chatId);
+  const history = draftHistory.get(key);
+  if (!dialog || history?.current.id !== promptId) {
+    return reply(chatId, "Кнопка устарела. Используйте последние кнопки.");
+  }
+  if (!session.access[DIALOG_ACCESS[dialog.kind]]) return reply(chatId, session.access.deniedMessage);
+  if ("busy" in dialog && dialog.busy) return reply(chatId, "Дождитесь завершения текущего шага.");
+  if ((dialog.kind === "payment" || dialog.kind === "stockPurchase") && await blockPendingFinance(chatId, session)) return;
+  if (discard) {
+    setDialog(chatId, null);
+    return reply(chatId, "Отменено.");
+  }
+  const previous = history.previous.at(-1);
+  if (!previous) return;
+  dialogs.set(key, structuredClone(previous.state));
+  draftHistory.set(key, { current: previous, previous: history.previous.slice(0, -1) });
+  return reply(chatId, previous.text, previous.buttons);
 }
 
 async function dispatchCallback(
@@ -908,10 +971,8 @@ async function dispatchCallback(
     const dialog = getDialog(chatId);
     await stockPurchaseCallback({ reply, getDialog, setDialog },chatId,session.userId,dialog?.kind === "stockPurchase" ? dialog : undefined,rest); return;
   }
-  if (action === "cancel") {
-    setDialog(chatId, null);
-    await reply(chatId, "Отменено.");
-    return;
+  if (action === "draftback" || action === "draftstop") {
+    return navigateDraft(chatId, session, rest[0], action === "draftstop");
   }
 
   // Карточка проекта (в т.ч. «Обновить»)
@@ -954,7 +1015,7 @@ async function dispatchCallback(
         projectNumber: menu.projectNumber, expectedStage:menu.expectedStage,clientMutationId,
         step: "refusalReason",
       });
-      await reply(chatId, "Причина отказа:");
+      await reply(chatId, "Причина отказа:", [[CANCEL_BUTTON]]);
       return;
     }
     const result = await crm.changeStage(session.userId, projectId, toStage,undefined,menu.expectedStage,clientMutationId);
@@ -997,7 +1058,7 @@ async function dispatchCallback(
       await reply(
         chatId,
         "Выберите менеджера:",
-        buttonsRow(
+        [...buttonsRow(
           [
             { text: "— без менеджера", callback_data: `mgr:none` },
             ...(managers.items ?? []).map((item) => ({
@@ -1006,7 +1067,7 @@ async function dispatchCallback(
             })),
           ],
           2,
-        ),
+        ), [CANCEL_BUTTON]],
       );
       return;
     }
@@ -1046,7 +1107,7 @@ async function dispatchCallback(
   if (action === "cli") {
     const dialog = getDialog(chatId);
     if (dialog?.kind !== "newProject") {
-      await reply(chatId, "Сессия устарела — начните заново: /новый");
+      await reply(chatId, `Сессия устарела — начните заново: ${BOT_COMMAND.newProject}`);
       return;
     }
     dialog.clientId = rest[0];
@@ -1056,7 +1117,7 @@ async function dispatchCallback(
     await reply(
       chatId,
       "3/3 Менеджер проекта:",
-      buttonsRow(
+      [...buttonsRow(
         [
           { text: "— без менеджера", callback_data: `mgr:none` },
           ...(managers.items ?? []).map((item) => ({
@@ -1065,7 +1126,7 @@ async function dispatchCallback(
           })),
         ],
         2,
-      ),
+      ), [CANCEL_BUTTON]],
     );
     return;
   }
@@ -1073,7 +1134,7 @@ async function dispatchCallback(
   // Callback из старого мастера не может задать валюту нового проекта.
   if (action === "npc") {
     setDialog(chatId, null);
-    await reply(chatId, "Новые проекты создаются только в BYN. Сессия устарела — начните заново: /новый");
+    await reply(chatId, `Новые проекты создаются только в BYN. Сессия устарела — начните заново: ${BOT_COMMAND.newProject}`);
     return;
   }
 
@@ -1132,6 +1193,7 @@ async function dispatchCallback(
   if (action === "payoptions") {
     const dialog = getDialog(chatId);
     if (dialog?.kind !== "payment" || dialog.step !== "confirm" || dialog.busy || rest[0] !== dialog.clientMutationId) return;
+    if (await blockPendingFinance(chatId, session)) return;
     if (rest[1] === "date") {
       dialog.step = "paidAt";
       await reply(chatId, "Введите дату оплаты ГГГГ-ММ-ДД или «авто» для текущей даты.", [[CANCEL_BUTTON]]);
@@ -1160,13 +1222,13 @@ async function dispatchCallback(
     await reply(
       chatId,
       `Касса (${rest[0]}):`,
-      buttonsRow(
+      [...buttonsRow(
         inCurrency.map((item) => ({
           text: item.label,
           callback_data: `cash:${item.id}`,
         })),
         2,
-      ),
+      ), [CANCEL_BUTTON]],
     );
     return;
   }
@@ -1186,16 +1248,16 @@ async function dispatchCallback(
       setDialog(chatId, dialog);
       const articles = (await crm.directory(session.userId, "articles")).items ?? [];
       if (articles.length === 0) {
-        await reply(chatId, "Нет активных статей расхода — создайте их в CRM.");
+        await reply(chatId, "Нет активных статей расхода — создайте их в CRM.", [[CANCEL_BUTTON]]);
         return;
       }
       await reply(
         chatId,
         "Статья расхода:",
-        buttonsRow(
+        [...buttonsRow(
           articles.map((item) => ({ text: item.label, callback_data: `art:${item.id}` })),
           2,
-        ),
+        ), [CANCEL_BUTTON]],
       );
       return;
     }
@@ -1255,14 +1317,17 @@ async function dispatchCallback(
     } });
     if (result.ok && getDialog(chatId) === dialog) setDialog(chatId, null);
     const label = dialog.direction === "INCOME" ? "Приход" : "Расход";
+    const retryHint = "outcome" in result && result.outcome === "ROLLED_BACK"
+      ? "Проверьте данные и повторите подтверждение."
+      : `Проверьте результат командой ${BOT_COMMAND.verifyOperation}.`;
     await reply(
       chatId,
       result.ok
         ? `✅ ${label} ${formatMoney(dialog.amount, dialog.currency)} · ${paymentContext(dialog)} — записано`
-        : `❌ ${result.error}. Данные сохранены — повторите подтверждение или отмените операцию.`,
+        : `❌ ${result.error ?? "Операция не подтверждена"}. ${retryHint}`,
     );
     } catch (error) {
-      await reply(chatId, error instanceof CrmError ? `❌ ${error.message}. Повторите подтверждение: идентификатор операции сохранён.` : "Не удалось подтвердить операцию. Повторите подтверждение.");
+      await reply(chatId, `❌ ${error instanceof CrmError ? error.message : "Ответ о сохранении не получен"}. Проверьте результат командой ${BOT_COMMAND.verifyOperation}.`);
     } finally { dialog.busy = false; }
     return;
   }

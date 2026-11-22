@@ -25,7 +25,7 @@ globalThis.fetch=async(input,options={})=>{
   const q=url.searchParams.get('q');
   result={ok:true,projects:q==='Шкаф'?[{id:'older',number:'204',title:'Шкаф в холл',currency:'BYN'},{id:'newer',number:'206',title:'Шкаф в спальню',currency:'BYN'}]:[{id:'project',number:'205',title:'Order',currency:'BYN'}]};
  }
- else if(url.pathname==='/api/v1/bot/directory'){result={ok:true,items:url.searchParams.get('type')==='cash'?[{id:'cash',label:'Касса',currency:'BYN'},{id:'usd',label:'USD',currency:'USD'}]:[{id:'article',label:'Материалы'}]};}
+ else if(url.pathname==='/api/v1/bot/directory'){result={ok:true,items:url.searchParams.get('type')==='cash'?[{id:'cash',label:'Касса',currency:'BYN'},{id:'usd',label:'USD',currency:'USD'},{id:'test-cash',label:' ТеСт ',currency:'USD'}]:[{id:'article',label:'Материалы'}]};}
  else if(url.pathname==='/api/v1/bot/documents/upload'){
   if(!uploads.has(body.clientMutationId))uploads.set(body.clientMutationId,{id:randomUUID(),fileName:body.fileName,mimeType:body.mimeType});
   result={ok:true,document:uploads.get(body.clientMutationId)};if(loseUpload){loseUpload=false;throw Error('lost upload ACK');}
@@ -195,6 +195,57 @@ test('private project list opens an accountant payment without a manager card an
  assert.equal(calls.some(row=>row.actor==='actor-'+chat&&row.path.endsWith('/projects/project')),false);
 });
 
+test('back from a manual date restores the payment without allowing old confirmation buttons', async () => {
+  const chat = 8844;
+  roles.set(String(chat), ["ACCOUNTANT"]);
+  bindings.set(String(chat), "payment-draft:1:0");
+  const press = (match, sentId = sent.length) => {
+    const button = sent[sentId - 1]?.reply_markup?.inline_keyboard?.flat().find(match);
+    assert.ok(button?.callback_data);
+    const update = callback(chat, button.callback_data);
+    update.callback_query.message.message_id = sentId;
+    return handleUpdate(update);
+  };
+  await handleUpdate(message(chat, "/приход 205 125,50"));
+  await press(button => button.callback_data === "cur:USD");
+  assert.doesNotMatch(JSON.stringify(sent.at(-1).reply_markup), /тест|test-cash/i);
+  await press(button => button.callback_data === "cash:usd");
+  await handleUpdate(message(chat, "Аванс клиента"));
+  await press(button => button.text === "Дата оплаты");
+  await handleUpdate(message(chat, "2026-11-12"));
+  const summary = sent.at(-1).text;
+  const oldSummary = sent.length;
+  assert.match(summary, /Дата оплаты: 2026-11-12/);
+  await press(button => button.text === "Дата оплаты");
+  await handleUpdate(message(chat, "2026-11-31"));
+  await press(button => button.text === "← Назад");
+  assert.equal(sent.at(-1).text, summary);
+  const validSummary = sent.length;
+  await press(button => button.callback_data.startsWith("payok:"), oldSummary);
+  assert.match(sent.at(-1).text, /Кнопка устарела/);
+  assert.equal(calls.filter(row => row.path.endsWith("/payments") && row.actor === "actor-" + chat).length, 0);
+  await press(button => button.callback_data.startsWith("payok:"), validSummary);
+  const operations = calls.filter(row => row.path.endsWith("/payments") && row.actor === "actor-" + chat);
+  assert.equal(operations.length, 1);
+  const { body } = operations[0];
+  assert.equal(body.amount, 125.5);
+  assert.equal(body.paidAt, "2026-11-12");
+  assert.equal(body.cashAccountId, "usd");
+  assert.equal(body.comment, "Аванс клиента");
+});
+
+test("the command list uses the clearer names and the old retry name still works", async () => {
+  const chat = 8845;
+  roles.set(String(chat), ["ADMIN"]);
+  await handleUpdate(message(chat, "/команды"));
+  const help = sent.at(-1).text;
+  assert.match(help, /^\/проверить_операцию — проверить, сохранилась ли операция$/m);
+  assert.match(help, /^\/возврат_на_склад — вернуть ранее выданный материал$/m);
+  assert.doesNotMatch(help, /^\/(повтор|возврат) —/m);
+  await handleUpdate(message(chat, "/повтор"));
+  assert.match(sent.at(-1).text, /Нет операций, которые нужно проверить/);
+});
+
 test('after restarting engine a lost payment acknowledgement is retried with the stored payload',async()=>{
  const chat=8834;roles.set(String(chat),['ACCOUNTANT']);
  await handleUpdate(message(chat,'/приход 205 100'));
@@ -202,12 +253,14 @@ test('after restarting engine a lost payment acknowledgement is retried with the
  await handleUpdate(message(chat,'—'));losePayment=true;
  await handleUpdate(callback(chat,latestButton(chat,'payok:')));
  const first=calls.filter(row=>row.path.endsWith('/payments')&&row.actor==='actor-'+chat).at(-1);
+ await handleUpdate(callback(chat,latestButton(chat,'draftback:')));
+ assert.match(sent.at(-1).text,/проверить_операцию/);
  const require=createRequire(import.meta.url);
  for(const module of ['../dist/engine.js','../dist/finance-checkpoint.js'])delete require.cache[require.resolve(module)];
  const restarted=require('../dist/engine.js').handleUpdate;
  await restarted(message(chat,'/приход 205 100'));
- assert.match(sent.at(-1).text,/повтор/);
- await restarted(message(chat,'/повтор'));
+ assert.match(sent.at(-1).text,/проверить_операцию/);
+ await restarted(message(chat,'/проверить_операцию'));
  assert.match(sent.at(-1).text,/подтверждена/);
  const attempts=calls.filter(row=>row.path.endsWith('/payments')&&row.actor==='actor-'+chat);
  assert.equal(attempts.length,2);assert.deepEqual(attempts[1],first);

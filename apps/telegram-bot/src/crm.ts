@@ -1,4 +1,5 @@
 import { config } from "./config";
+import { isTestChoice } from "./dialog-choices";
 
 // Клиент REST CRM /api/v1/bot/*. Ответы домена всегда {ok, error?, ...} —
 // HTTP 200/4xx; исключения бросаем только для инфраструктурных сбоев.
@@ -110,10 +111,15 @@ async function request<T>(
   return data as T;
 }
 
+function hideTestChoices<T extends { items?: DirectoryItem[] }>(result: T): T {
+  if (!result.items) return result;
+  return { ...result, items: result.items.filter(item => !isTestChoice(item.label)) };
+}
+
 export const crm = {
   stockChoices(actorId:string,kind:"products"|"materials"|"sources",options:{q?:string;productId?:string;income?:boolean}={}) {
     const params=new URLSearchParams({kind});if(options.q)params.set("q",options.q);if(options.productId)params.set("productId",options.productId);if(options.income)params.set("income","1");
-    return request<{ok:boolean;error?:string;items?:StockChoice[]}>("GET","/stock-movements?"+params,undefined,actorId);
+    return request<{ok:boolean;error?:string;items?:StockChoice[]}>("GET","/stock-movements?"+params,undefined,actorId).then(hideTestChoices);
   },
   createStockMovement(actorId:string,input:Record<string,unknown>) {
     return request<{ok:boolean;error?:string;movementId?:string;repeated?:boolean}>("POST","/stock-movements",input,actorId);
@@ -235,6 +241,6 @@ export const crm = {
       `/directory?type=${type}${q ? `&q=${encodeURIComponent(q)}` : ""}`,
       undefined,
       actorId,
-    );
+    ).then(hideTestChoices);
   },
 };

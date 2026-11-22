@@ -82,12 +82,12 @@ test('receipt photos, optional skip after upload error, cancellation and current
  await handleUpdate({...msg(id,undefined),message:{...msg(id,undefined).message,photo:[{file_id:'large',file_unique_id:'large',width:100,height:100,file_size:4}]}});
  await handleUpdate(cb(id,button(id,value=>value.endsWith(':continue'))));
  assert.ok(button(id,value=>value.endsWith(':ok')));assert.match(sent.at(-1).text,/Фото-large.jpg/);
- await handleUpdate(cb(id,'cancel'));
+ await handleUpdate(cb(id,button(id,value=>value.startsWith('draftstop:'))));
  const next=9912;await begin(next,false);loseUpload=true;
  const file={document:{file_id:'f',file_unique_id:'f',file_name:'f.pdf',mime_type:'application/pdf',file_size:4}};
  await handleUpdate({...msg(next,undefined),message:{...msg(next,undefined).message,...file}});
  const retry=button(next,value=>value.includes(':docretry:'));await handleUpdate(cb(next,button(next,value=>value.endsWith(':nodoc'))));
- assert.match(sent.at(-1).text,/Без документа/);await handleUpdate(cb(next,'cancel'));
+ assert.match(sent.at(-1).text,/Без документа/);await handleUpdate(cb(next,button(next,value=>value.startsWith('draftstop:'))));
  const before=calls.filter(row=>row.path.endsWith('/getFile')).length;
  await handleUpdate(cb(next,retry));await begin(next,false);roles.set(String(next),['MANAGER']);
  await handleUpdate({...msg(next,undefined),message:{...msg(next,undefined).message,...file}});
@@ -110,7 +110,7 @@ test('quote transport failure permits retry without changing the collected input
  await handleUpdate(cb(id,retry));assert.ok(button(id,value=>value.endsWith(':ok')));
  const quotes=calls.filter(row=>row.path.endsWith('/quote')&&row.actor==='actor-'+id);
  assert.equal(quotes.length,2);assert.deepEqual(quotes[0].body,quotes[1].body);
- await handleUpdate(cb(id,'cancel'));
+ await handleUpdate(cb(id,button(id,value=>value.startsWith('draftstop:'))));
 });
 test('old search, old dialog, revoked finance role and group callbacks cannot conduct a purchase',async()=>{
  const id=9903;await handleUpdate(msg(id,'/закупка'));await handleUpdate(msg(id,'first'));
