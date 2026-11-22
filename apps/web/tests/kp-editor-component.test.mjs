@@ -413,6 +413,7 @@ test('locked editor disables writes while original contract form loads current s
     await child.locator('#contract-customer-name').waitFor(); assert.equal(await child.locator('#contract-customer-name').inputValue(), 'Клиент CRM');
     assert.equal(await child.locator('#contract-customer-name').isDisabled(), false, 'contract remains editable after proposal lock');
     assert.equal(await child.locator('[data-contract-path="customer.passport"]').inputValue(), 'Контрольный документ');
+    await expect(child.locator('#contractSummary')).toContainText('Приложение №4 — Инструкция по эксплуатации мебели PERO');
     assert.equal(writes.length, 0);
     await page.screenshot({ path: path.join(output, 'contract-form.png'), fullPage: true });
   } finally { await context.close(); }
