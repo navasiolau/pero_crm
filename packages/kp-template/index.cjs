@@ -7,7 +7,18 @@ const fontManifest = require('./fonts-manifest.json');
 const assetRoot = path.join(__dirname, 'assets');
 const FurnitureSpecifications = require('./furniture-specifications.js');
 const SheetRender = require('./assets/public/js/sheet-render.js');
-const ContractModel = require('./assets/public/js/contract-model.js');
+const browserContractModel = require('./assets/public/js/contract-model.js');
+const { instructionSnapshot } = require('./assets/lib/contract-operation-instructions.js');
+const ContractModel = {
+  ...browserContractModel,
+  validate(settings, proposals, profiles) {
+    const result = browserContractModel.validate(settings, proposals, profiles);
+    if (!result.errors.length && settings.customer.type === 'individual') {
+      result.summary.operationInstructions = instructionSnapshot(proposals, result.summary.sources);
+    }
+    return result;
+  },
+};
 const publicNames = new Set([
   'public/css/app.css', 'public/css/contract.css',
   'public/js/app.js', 'public/js/sheet-render.js', 'public/js/contract-model.js', 'public/js/contract-editor.js',
@@ -38,8 +49,9 @@ function getKpTemplateIdentity() {
   const sourceManifestHash = digest(fs.readFileSync(path.join(__dirname, 'source-manifest.json')));
   const fontManifestHash = digest(fs.readFileSync(path.join(__dirname, 'fonts-manifest.json')));
   if (digest(fs.readFileSync(path.join(assetRoot, 'public/fonts/fonts.css'))) !== fontManifest.cssSha256) throw Error('KP_FONT_INTEGRITY_FAILED');
-  const files = ['public/js/sheet-render.js', 'public/js/furniture-specifications.js', 'public/js/contract-model.js', 'lib/contract-docx.js', 'templates/contracts/furniture.docx'];
-  const hashes = files.map(name => [name, digest(fs.readFileSync(assetPath(name)))]);
+  const files = ['public/js/sheet-render.js', 'public/js/furniture-specifications.js', 'public/js/contract-model.js',
+    'lib/contract-docx.js', 'lib/contract-operation-instructions.js', 'templates/contracts/furniture.docx'];
+  const hashes = files.map(name => [name, digest(fs.readFileSync(path.join(assetRoot, name)))]);
   for (const font of fontManifest.files) {
     if (digest(fs.readFileSync(path.join(assetRoot, font.path))) !== font.sha256) throw Error('KP_FONT_INTEGRITY_FAILED');
   }

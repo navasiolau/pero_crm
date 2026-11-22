@@ -238,7 +238,8 @@ export function createContractWorkflow(ports: ContractWorkflowPorts) {
       const versionId = randomUUID();
       await tx.createContractVersion({ id: versionId, contractId: extra.contractId, settingsSnapshot: extra.settingsSnapshot as ContractObject,
         clientSnapshot: extra.clientSnapshot as ContractObject, sourcesSnapshot: payload.frozenSources.map(source => json(source)),
-        renderSnapshot: json({ template: extra.templateSnapshot, profile: extra.profile, releases, pageCounts: output.pageCounts }),
+        renderSnapshot: json({ template: extra.templateSnapshot, profile: extra.profile, releases, pageCounts: output.pageCounts,
+          ...(extra.summary.operationInstructions ? { operationInstructions: extra.summary.operationInstructions } : {}) }),
         templateVersion: extra.templateVersion, docxArtifactId: docx.id, actorId: actor.id });
       const eventIds: string[] = [];
       for (const source of payload.frozenSources) if (source.projectStage === "LEAD" || source.projectStage === "ESTIMATE") eventIds.push(...await ports.lifecycle.advanceToContract(tx, actor, source, randomUUID(), operationRootId));
