@@ -50,6 +50,26 @@ test('return uses saved issue; legacy return alone requests an explicit valuatio
   else{assert.equal(body.productId,'product');assert.equal(body.sourceMovementId,'issue-source');assert.equal(body.unitPrice,undefined);}
  }legacy=false;
 });
+
+test("back after choosing a return preserves the item and recent issue options", async () => {
+  const id = 9916;
+  await product(id, "/возврат_на_склад");
+  const sourceMenu = sent.at(-1).text;
+  await handleUpdate(cb(id, button(id, ":pick:")));
+  assert.match(sent.at(-1).text, /Количество/);
+  await handleUpdate(cb(id, button(id, "draftback:")));
+  assert.equal(sent.at(-1).text, sourceMenu);
+  await handleUpdate(cb(id, button(id, ":pick:")));
+  await handleUpdate(msg(id, "2"));
+  await handleUpdate(msg(id, "—"));
+  await handleUpdate(cb(id, button(id, ":ok")));
+  const movements = calls.filter(row => row.actor === "actor-" + id && row.body?.kind === "RETURN");
+  assert.equal(movements.length, 1);
+  assert.equal(movements[0].body.productId, "product");
+  assert.equal(movements[0].body.sourceMovementId, "issue-source");
+  assert.equal(movements[0].body.quantity, "2");
+});
+
 test('inventory uses its existing no-cash contract and warehouse manager does not receive a source price',async()=>{
  const id=9914;roles.set(String(id),['MANAGER']);await handleUpdate(msg(id,'/инвприход'));
  await handleUpdate(msg(id,'Петля'));await handleUpdate(cb(id,button(id,':pick:')));await handleUpdate(msg(id,'3'));await handleUpdate(msg(id,'20'));await handleUpdate(msg(id,'—'));
@@ -57,7 +77,7 @@ test('inventory uses its existing no-cash contract and warehouse manager does no
  const body=calls.filter(row=>row.actor==='actor-'+id&&row.body?.kind==='INCOME').at(-1).body;
  assert.equal(body.receiptKind,'INVENTORY');assert.equal(body.cashAccountId,undefined);assert.equal(body.projectId,undefined);
  await product(id,'/возврат');await handleUpdate(cb(id,button(id,':pick:')));await handleUpdate(msg(id,'1'));await handleUpdate(msg(id,'—'));
- assert.ok(!sent.at(-1).text.includes('Цена исходной'));await handleUpdate(cb(id,'cancel'));
+ assert.ok(!sent.at(-1).text.includes('Цена исходной'));await handleUpdate(cb(id,button(id,'draftstop:')));
 });
 test('stale search, role revocation, group and foreign callbacks never create stock movements',async()=>{
  const id=9915;await product(id,'/выдача');await handleUpdate(msg(id,'old'));const old=button(id,':pick:');

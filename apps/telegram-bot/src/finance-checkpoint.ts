@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "
 import { join } from "node:path";
 import { config } from "./config";
 import { crm } from "./crm";
+import { BOT_COMMAND } from "./commands";
 
 type FinanceCommand = {
   kind: "payment" | "purchase";
@@ -31,7 +32,7 @@ export async function submitFinanceCommand(chatId: number, command: FinanceComma
   try {
     const pending = pendingFinanceCommand(chatId, command.actorId);
     if (pending && JSON.stringify(pending) !== JSON.stringify(command)) {
-      return { ok: false, error: "Сначала проверьте предыдущую операцию через /повтор" };
+      return { ok: false, error: `Сначала проверьте предыдущую операцию через ${BOT_COMMAND.verifyOperation}` };
     }
     if (!pending) {
       mkdirSync(config.financeStateDir, { recursive: true, mode: 0o700 });

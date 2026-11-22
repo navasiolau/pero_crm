@@ -5,7 +5,12 @@ export type DialogContext<T> = {
  getDialog:(chatId:number)=>unknown;
  setDialog:(chatId:number,dialog:T|null)=>void;
 };
-export const CANCEL_ROW:InlineButton[]=[{text:"❌ Отмена",callback_data:"cancel"}];
+export const CANCEL_BUTTON: InlineButton = { text: "Отменить всё", callback_data: "cancel" };
+export const CANCEL_ROW: InlineButton[] = [CANCEL_BUTTON];
+
+export function isTestChoice(label: string): boolean {
+  return label.trim().toLowerCase() === "тест";
+}
 export function dialogChoices<T extends {label:string;currency?:string}>(prefix:string,id:string,items:T[],label=(item:T)=>item.label+(item.currency?" · "+item.currency:"")){
  const token=randomUUID().slice(0,8);
  return {token,buttons:items.map((item,index)=>[{text:label(item),callback_data:`${prefix}:${id}:pick:${token}:${index}`}])};
