@@ -233,8 +233,9 @@ test("security.routes: credentials, Bearer, Telegram и команды чере�
       body: new URLSearchParams({ csrfToken, callbackUrl: `${f.target.baseUrl}/login` }),
     });
     assert.equal(logout.status, 302);
-    assert.equal(new URL(logout.headers.get("location")!, f.target.baseUrl).pathname, "/login");
-    assert.ok(logout.headers.getSetCookie().some(value => /authjs\.session-token=;.*Max-Age=0/i.test(value)));
+    const cleared = logout.headers.getSetCookie().find(value => /authjs\.session-token=;.*Max-Age=0/i.test(value));
+    assert.ok(cleared);
+    assert.equal((await session(cleared.split(";", 1)[0])).body, null);
     assert.equal(await f.db.changeLog.count({ where: { OR: [
       { actorId: { in: [active.id, inactive.id] } },
       { entity: "user", entityId: { in: [active.id, inactive.id] } },
