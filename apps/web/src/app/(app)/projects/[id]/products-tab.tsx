@@ -237,11 +237,11 @@ export function ProductsTab({
     const source = new URL(window.location.href);
     const list = source.searchParams.getAll("returnTo");
     const productsPath = projectProductsHref(projectId, list.length === 1 ? list[0] : undefined);
-    const parent = new URL(productsPath, source.origin);
+    const [parentPath, parentQuery] = productsPath.split("?", 2);
     const previousSearch = source.search;
     // Приводим запись истории к тому же адресу, который использует стрелка.
-    if (source.pathname === parent.pathname && [...source.searchParams.keys()].every(key => key === "tab" || key === "returnTo")) {
-      source.search = parent.search;
+    if (source.pathname === parentPath && [...source.searchParams.keys()].every(key => key === "tab" || key === "returnTo")) {
+      source.search = parentQuery;
     } else if (source.searchParams.getAll("tab").join(",") !== "products") {
       source.searchParams.set("tab", "products");
     }
