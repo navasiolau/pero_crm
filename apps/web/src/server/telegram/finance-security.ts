@@ -69,7 +69,7 @@ const pages = new Set([
   "/finance", "/finance/expenses", "/finance/income", "/finance/accounts", "/finance/accounts/report",
   "/finance/articles", "/finance/projects", "/finance/payroll", "/finance/payroll/export", "/finance/advances",
   "/finance/documents", "/logistics", "/api/finance/projects",
-  "/api/finance/documents/upload",
+  "/api/finance/documents/upload", "/api/logistics/documents/upload",
 ]);
 
 export function isTelegramFinancePath(path: string) {

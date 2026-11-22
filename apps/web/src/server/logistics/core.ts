@@ -3,6 +3,8 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { canManageLogistics, canReadLogisticsDocuments } from "@/lib/logistics-access";
 import { UploadError } from "@/server/files/upload-result";
+import type { DomainActor } from "@/server/actor";
+import { TELEGRAM_SECTION_DENIED } from "@/server/telegram/access";
 import { productDraftVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 import { logisticsTripCreateSchema, logisticsTripUpdateSchema, shipmentLineKey,
   type LogisticsTripManifestInput, type LogisticsTripMutationResult } from "./contracts";
@@ -13,11 +15,12 @@ import { logisticsTripUndoCommand, manifestSnapshot } from "./lifecycle-contract
 export type LogisticsTransaction = <T>(operation: (tx: Prisma.TransactionClient) => Promise<T>) => Promise<T>;
 
 export async function requireLogisticsActor(actorId: string | null | undefined,
-  db: Pick<Prisma.TransactionClient, "user">, mode: "manage" | "documents" = "manage") {
+  db: Pick<Prisma.TransactionClient, "user">, mode: "manage" | "documents" = "manage", source: DomainActor["source"] = "web") {
   if (!actorId) throw new UploadError("LOGISTICS_AUTH_REQUIRED", 401, "auth", "Не авторизован");
   const actor = await db.user.findUnique({ where: { id: actorId }, select: { id: true, name: true, active: true, roles: true } });
   if (!actor?.active || !(mode === "manage" ? canManageLogistics(actor.roles) : canReadLogisticsDocuments(actor.roles)))
-    throw new UploadError("LOGISTICS_FORBIDDEN", 403, "auth", "Недостаточно прав для логистики", "forbidden");
+    throw new UploadError("LOGISTICS_FORBIDDEN", 403, "auth",
+      source === "telegram" ? TELEGRAM_SECTION_DENIED : "Недостаточно прав для логистики", "forbidden");
   return actor;
 }
 
@@ -132,11 +135,11 @@ async function mutationReceipt(tx: Prisma.TransactionClient, actorId: string, cl
 }
 
 async function auditMutation(tx: Prisma.TransactionClient, actor: { id: string; name: string }, clientMutationId: string,
-  operation: "create" | "update", fingerprint: string, row: LogisticsManifestRecord, previous?: LogisticsManifestRecord) {
+  operation: "create" | "update", fingerprint: string, source: DomainActor["source"], row: LogisticsManifestRecord, previous?: LogisticsManifestRecord) {
   await tx.logisticsMutation.create({ data: { clientMutationId, actorId: actor.id, tripId: row.id,
     requestFingerprint: fingerprint, operation, revision: row.revision } });
   await writeChangeLogInTransaction(tx, { id: `logistics-mutation:${clientMutationId}`, actorType: "user", actorId: actor.id,
-    actorName: actor.name, entity: "logisticsTrip", entityId: row.id, action: operation,
+    actorName: actor.name, source, entity: "logisticsTrip", entityId: row.id, action: operation,
     ...(previous ? { oldValue: { ...manifestSnapshot(previous), revision: previous.revision } } : {}),
     newValue: { ...manifestSnapshot(row), revision: row.revision },
     reversal: logisticsTripUndoCommand({ tripId: row.id, expectedRevision: row.revision, expectedHidden: false,
@@ -147,13 +150,13 @@ async function auditMutation(tx: Prisma.TransactionClient, actor: { id: string; 
 }
 
 export async function createLogisticsTripCore(actorId: string | null | undefined, input: unknown,
-  transaction: LogisticsTransaction): Promise<LogisticsTripMutationResult> {
+  transaction: LogisticsTransaction, source: DomainActor["source"] = "web"): Promise<LogisticsTripMutationResult> {
   const parsed = logisticsTripCreateSchema.safeParse(input);
   if (!parsed.success) invalid(parsed.error.issues[0]?.message ?? "Проверьте состав отгрузки");
   const data = parsed.data;
   const fingerprint = tripMutationFingerprint(actorId, "create", data);
   return transaction(async tx => {
-    const actor = await requireLogisticsActor(actorId, tx);
+    const actor = await requireLogisticsActor(actorId, tx, "manage", source);
     await lockLogisticsMutation(tx, data.clientMutationId);
     const receipt = await mutationReceipt(tx, actor.id, data.clientMutationId, fingerprint);
     if (receipt) return receipt;
@@ -163,19 +166,19 @@ export async function createLogisticsTripCore(actorId: string | null | undefined
       comment: data.comment, ttnNotRequired: prepared.ttnNotRequired, createdById: actor.id, updatedById: actor.id } });
     await replaceTripManifestInTransaction(tx, tripId, prepared);
     const row = await tx.logisticsTrip.findUniqueOrThrow({ where: { id: tripId }, include: logisticsManifestInclude });
-    await auditMutation(tx, actor, data.clientMutationId, "create", fingerprint, row);
+    await auditMutation(tx, actor, data.clientMutationId, "create", fingerprint, source, row);
     return { tripId, revision: row.revision, repeated: false };
   });
 }
 
 export async function updateLogisticsTripCore(actorId: string | null | undefined, input: unknown,
-  transaction: LogisticsTransaction): Promise<LogisticsTripMutationResult> {
+  transaction: LogisticsTransaction, source: DomainActor["source"] = "web"): Promise<LogisticsTripMutationResult> {
   const parsed = logisticsTripUpdateSchema.safeParse(input);
   if (!parsed.success) invalid(parsed.error.issues[0]?.message ?? "Проверьте состав отгрузки");
   const data = parsed.data;
   const fingerprint = tripMutationFingerprint(actorId, "update", data);
   return transaction(async tx => {
-    const actor = await requireLogisticsActor(actorId, tx);
+    const actor = await requireLogisticsActor(actorId, tx, "manage", source);
     await lockLogisticsMutation(tx, data.clientMutationId);
     const receipt = await mutationReceipt(tx, actor.id, data.clientMutationId, fingerprint);
     if (receipt) return receipt;
@@ -191,7 +194,7 @@ export async function updateLogisticsTripCore(actorId: string | null | undefined
     if (changed.count !== 1) conflict();
     await replaceTripManifestInTransaction(tx, data.tripId, prepared, previous);
     const row = await tx.logisticsTrip.findUniqueOrThrow({ where: { id: data.tripId }, include: logisticsManifestInclude });
-    await auditMutation(tx, actor, data.clientMutationId, "update", fingerprint, row, previous);
+    await auditMutation(tx, actor, data.clientMutationId, "update", fingerprint, source, row, previous);
     return { tripId: row.id, revision: row.revision, repeated: false };
   });
 }

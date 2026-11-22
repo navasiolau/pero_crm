@@ -8,6 +8,7 @@ html[data-telegram-finance] {
   --telegram-workspace-bg: color-mix(in oklab, var(--background), var(--telegram-accent) 5%);
   --telegram-safe-top: max(env(safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px), var(--tg-content-safe-area-inset-top, 0px));
   --telegram-safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px), var(--tg-content-safe-area-inset-bottom, 0px));
+  --telegram-dock-space: calc(4.25rem + 1px + var(--telegram-safe-bottom));
 }
 
 .dark [data-telegram-finance-workspace],
@@ -20,7 +21,7 @@ html.dark[data-telegram-finance] {
 [data-telegram-finance-workspace] {
   display: flex;
   flex-direction: column;
-  min-block-size: var(--tg-viewport-stable-height, 100dvh);
+  min-block-size: 100dvh;
   background: var(--telegram-workspace-bg);
 }
 
@@ -40,14 +41,14 @@ html[data-telegram-finance] body {
 
 .telegram-finance-main {
   flex: 1;
-  padding-block: calc(1rem + var(--telegram-safe-top)) 1.25rem;
+  padding-block: calc(1rem + var(--telegram-safe-top)) calc(1.25rem + var(--telegram-dock-space));
 }
 
 .telegram-finance-dock {
-  position: sticky;
+  position: fixed;
   z-index: 30;
   inset-block-end: 0;
-  margin-block-start: auto;
+  inset-inline: 0;
   border-block-start: 1px solid var(--border);
   background: var(--card);
   box-shadow: 0 -6px 24px color-mix(in oklab, var(--foreground) 5%, transparent);
@@ -202,7 +203,7 @@ html[data-telegram-finance] body {
 
 @media (max-width: 47.999rem) {
   html[data-telegram-finance] {
-    scroll-padding-block-end: calc(4.5rem + var(--telegram-safe-bottom));
+    scroll-padding-block-end: var(--telegram-dock-space);
   }
 
   [data-telegram-finance-workspace] [data-slot="page-header"] {

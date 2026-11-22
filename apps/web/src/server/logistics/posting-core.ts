@@ -1,4 +1,5 @@
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
+import type { DomainActor } from "@/server/actor";
 import { logisticsJournalHints } from "./journal";
 import { logisticsTripUndoCommand, manifestSnapshot } from "./lifecycle-contract";
 import { createHash, randomUUID } from "node:crypto";
@@ -54,11 +55,11 @@ function manifestOf(row: LogisticsManifestRecord): LogisticsTripManifestInput {
 
 /** Сеть вызывается один раз перед короткой общей денежной транзакцией. */
 export async function createLogisticsPostingCore(actorId: string | null | undefined, input: unknown, mode: PostingMode,
-  dependencies: LogisticsMoneyDependencies): Promise<LogisticsPostingCoreResult> {
+  dependencies: LogisticsMoneyDependencies, source: DomainActor["source"] = "web"): Promise<LogisticsPostingCoreResult> {
   const parsed = logisticsPostingSchema.safeParse(input);
   if (!parsed.success) failure(parsed.error.issues[0]?.message ?? "Проверьте стоимость и кассу рейса");
   const data = parsed.data;
-  const actor = await requireLogisticsActor(actorId, dependencies.db);
+  const actor = await requireLogisticsActor(actorId, dependencies.db, "manage", source);
   const fingerprint = logisticsPostingFingerprint(actor.id, mode, data);
   const receipt = await readReceipt(actor.id, fingerprint, data, dependencies.db);
   if (receipt) return receipt;
@@ -66,13 +67,13 @@ export async function createLogisticsPostingCore(actorId: string | null | undefi
   if (!trip || trip.deletedAt) failure("Рейс не найден");
   const date = data.manifest?.date ?? trip.date.toISOString().slice(0, 10);
   const prepared = await prepareLogisticsPayment(data, date, dependencies.db, dependencies.getRate);
-  return dependencies.transaction(tx => postLogisticsInTransaction(actor.id, data, mode, prepared, tx));
+  return dependencies.transaction(tx => postLogisticsInTransaction(actor.id, data, mode, prepared, tx, source));
 }
 
 /** Вызывать только под общей денежной блокировкой, затем блокировкой рейса. */
 export async function postLogisticsInTransaction(actorId: string, input: LogisticsPostingData, mode: PostingMode,
-  prepared: PreparedPayment, tx: Prisma.TransactionClient): Promise<LogisticsPostingCoreResult> {
-  const data = logisticsPostingSchema.parse(input), actor = await requireLogisticsActor(actorId, tx);
+  prepared: PreparedPayment, tx: Prisma.TransactionClient, source: DomainActor["source"] = "web"): Promise<LogisticsPostingCoreResult> {
+  const data = logisticsPostingSchema.parse(input), actor = await requireLogisticsActor(actorId, tx, "manage", source);
   await lockLogisticsTrip(tx, data.tripId);
   const fingerprint = logisticsPostingFingerprint(actor.id, mode, data);
   const receipt = await readReceipt(actor.id, fingerprint, data, tx);
@@ -135,7 +136,7 @@ export async function postLogisticsInTransaction(actorId: string, input: Logisti
     const saved = await tx.logisticsPostingAllocation.create({ data: { id: randomUUID(), postingId, ...allocation, projectNumberSnapshot: project.number } });
     if (saved.amount.isZero()) continue;
     const partPrepared = { ...prepared, account, project, amount: saved.amount.toNumber(), bynAmount: saved.bynAmount.toNumber() };
-    await createPaymentInTransaction({ ...actor, source: "web" }, { direction: "EXPENSE", projectId: project.id,
+    await createPaymentInTransaction({ ...actor, source }, { direction: "EXPENSE", projectId: project.id,
       amount: partPrepared.amount, currency: data.currency, cashAccountId: account.id,
       comment: manifest.comment || `Логистика · ${manifest.date}` }, partPrepared, tx, { logisticsAllocationId: saved.id, operationRootId });
   }
@@ -143,7 +144,7 @@ export async function postLogisticsInTransaction(actorId: string, input: Logisti
     payload: { tripId: previous.id, postingId, previousPostingId: current?.id ?? null, revision, amount: split.amount,
       currency: data.currency, bynAmount: split.bynAmount, projectIds: projects.map(project => project.id) } } });
   await writeChangeLogInTransaction(tx, { id: operationRootId, actorType: "user", actorId: actor.id,
-    actorName: actor.name, entity: "logisticsPosting", entityId: postingId, action: mode,
+    actorName: actor.name, source, entity: "logisticsPosting", entityId: postingId, action: mode,
     reversal: logisticsTripUndoCommand({ tripId: previous.id, expectedRevision: revision, expectedHidden: false,
       expectedPostingId: postingId, restoreHidden: false, restorePostingId: current?.id ?? null,
       manifest: replacement ? manifestSnapshot(previous) : null, requireNoDocuments: false }),

@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { auth } from "@/auth";
+import { financeSessionSource, scopedFinanceAuth } from "@/server/telegram/finance-session";
 import { prisma } from "@/lib/prisma";
 import { UploadError } from "@/server/files/upload-result";
 import { createLogisticsTripCore, updateLogisticsTripCore } from "./core";
@@ -9,8 +9,11 @@ import { logisticsTransaction } from "./service";
 
 async function mutate(input: unknown, operation: "create" | "update") {
   try {
-    const actorId = (await auth())?.user.id;
-    const result = await (operation === "create" ? createLogisticsTripCore : updateLogisticsTripCore)(actorId, input, logisticsTransaction);
+    const session = await scopedFinanceAuth();
+    const source = session ? financeSessionSource(session) : "web";
+    const result = await (operation === "create" ? createLogisticsTripCore : updateLogisticsTripCore)(
+      session?.user.id, input, logisticsTransaction, source,
+    );
     // Подтверждённый результат не теряется при сбое обновления UI; retry идемпотентен.
     await (async () => {
       revalidatePath("/logistics");

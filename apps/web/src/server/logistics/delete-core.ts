@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { canDeleteLogisticsTrip } from "@/lib/logistics-access";
 import { UploadError } from "@/server/files/upload-result";
+import type { DomainActor } from "@/server/actor";
+import { TELEGRAM_SECTION_DENIED } from "@/server/telegram/access";
 import { lockLogisticsMutation, lockLogisticsTrip, requireLogisticsActor, logisticsManifestInclude, type LogisticsTransaction } from "./core";
 import { logisticsTripDeleteSchema, type LogisticsTripDeleteResult } from "./delete-contracts";
 import { logisticsJournalHints } from "./journal";
@@ -15,25 +17,27 @@ const projectIds = (trip: DeletionTrip) => [...new Set([...trip.shares.map(row =
 function conflict(message: string): never {
   throw new UploadError("LOGISTICS_REVISION_CONFLICT", 409, "persist", message, "conflict");
 }
-async function requireAdministrator(actorId: string | null | undefined, tx: Prisma.TransactionClient) {
-  const actor = await requireLogisticsActor(actorId, tx);
+async function requireAdministrator(actorId: string | null | undefined, tx: Prisma.TransactionClient, source: DomainActor["source"]) {
+  const actor = await requireLogisticsActor(actorId, tx, "manage", source);
   if (!canDeleteLogisticsTrip(actor.roles))
-    throw new UploadError("LOGISTICS_DELETE_FORBIDDEN", 403, "auth", "Удалять рейсы может только администратор", "forbidden");
+    throw new UploadError("LOGISTICS_DELETE_FORBIDDEN", 403, "auth",
+      source === "telegram" ? TELEGRAM_SECTION_DENIED : "Удалять рейсы может только администратор", "forbidden");
   return actor;
 }
 
 /** transaction обязан брать общий денежный lock; затем mutation и trip, как у остальных денежных writers. */
-export async function deleteLogisticsTripCore(actorId: string | null | undefined, input: unknown, transaction: LogisticsTransaction):
+export async function deleteLogisticsTripCore(actorId: string | null | undefined, input: unknown,
+  transaction: LogisticsTransaction, source: DomainActor["source"] = "web"):
   Promise<LogisticsTripDeleteResult & { projectIds: string[]; eventId: string | null }> {
   const parsed = logisticsTripDeleteSchema.safeParse(input);
   if (!parsed.success) throw new UploadError("LOGISTICS_INPUT_INVALID", 422, "validation", "Проверьте идентификатор и ревизию рейса", "validation");
   const data = parsed.data;
   const fingerprint = createHash("sha256").update(JSON.stringify({ actorId, operation: "delete", ...data })).digest("hex");
   return transaction(async tx => {
-    await requireAdministrator(actorId, tx);
+    await requireAdministrator(actorId, tx, source);
     await lockLogisticsMutation(tx, data.clientMutationId);
     await lockLogisticsTrip(tx, data.tripId);
-    const actor = await requireAdministrator(actorId, tx);
+    const actor = await requireAdministrator(actorId, tx, source);
     const receipt = await tx.logisticsMutation.findUnique({ where: { clientMutationId: data.clientMutationId } });
     if (receipt && (receipt.actorId !== actor.id || receipt.operation !== "delete" || receipt.requestFingerprint !== fingerprint))
       conflict("Идентификатор удаления уже использован с другими данными");
@@ -55,7 +59,7 @@ export async function deleteLogisticsTripCore(actorId: string | null | undefined
       operation: "delete", requestFingerprint: fingerprint, revision } });
     const affected = projectIds(trip), current = trip.postings.find(row => row.status === "ACTIVE");
     await writeChangeLogInTransaction(tx, { id: `logistics-delete:${data.clientMutationId}`, actorType: "user", actorId: actor.id,
-      actorName: actor.name, source: "web", entity: "logisticsTrip", entityId: trip.id, action: "soft-delete",
+      actorName: actor.name, source, entity: "logisticsTrip", entityId: trip.id, action: "soft-delete",
       oldValue: { date: trip.date.toISOString().slice(0, 10), revision: trip.revision, projectIds: affected,
         lineIds: trip.lines.map(row => row.id), documentIds: trip.documents.map(row => row.id),
         postingId: current?.id ?? null, amount: current?.amount.toFixed(2) ?? null, currency: current?.currency ?? null,

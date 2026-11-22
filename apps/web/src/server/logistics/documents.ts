@@ -1,4 +1,5 @@
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
+import type { DomainActor } from "@/server/actor";
 import { createHash, randomUUID } from "node:crypto";
 import type { LogisticsDocument, Prisma } from "@prisma/client";
 import { uploadSizeLimitError, uploadSizeLimitFor } from "@/server/files/upload-limits";
@@ -34,9 +35,10 @@ export function createLogisticsDocumentService({ transaction, storage }: {
   transaction: LogisticsTransaction; storage: LogisticsDocumentStorage;
 }) {
   return {
-    async upload(actorId: string, input: LogisticsDocumentUploadInput, options: { onPhase?: (phase: UploadPhase) => void } = {}) {
-      options.onPhase?.("auth");
-      await transaction(tx => requireLogisticsActor(actorId, tx));
+    async upload(actorId: string, input: LogisticsDocumentUploadInput,
+      { onPhase, source = "web" }: { onPhase?: (phase: UploadPhase) => void; source?: DomainActor["source"] } = {}) {
+      onPhase?.("auth");
+      await transaction(tx => requireLogisticsActor(actorId, tx, "manage", source));
       const parsed = logisticsDocumentUploadSchema.safeParse({ tripId: input.tripId, clientMutationId: input.clientMutationId,
         stage: input.stage, ttnNumber: input.ttnNumber, fileName: input.fileName, mimeType: input.mimeType });
       const content = input.bytes, buffered = Buffer.isBuffer(content);
@@ -49,9 +51,9 @@ export function createLogisticsDocumentService({ transaction, storage }: {
       if (size > limit.maxBytes) throw new UploadError("LOGISTICS_DOCUMENT_TOO_LARGE", 413, "validation", uploadSizeLimitError(limit.kind), "validation");
       const contentHash = buffered ? createHash("sha256").update(content).digest("hex") : content.contentHash;
       const requestFingerprint = createHash("sha256").update(JSON.stringify({ actorId, ...data, size, contentHash })).digest("hex");
-      options.onPhase?.("persist");
+      onPhase?.("persist");
       const reserved = await transaction(async tx => {
-        await requireLogisticsActor(actorId, tx);
+        await requireLogisticsActor(actorId, tx, "manage", source);
         await lockUpload(tx, data.clientMutationId);
         await lockLogisticsTrip(tx, data.tripId);
         await requireTrip(tx, data.tripId);
@@ -67,11 +69,11 @@ export function createLogisticsDocumentService({ transaction, storage }: {
       });
       if (reserved.hiddenAt) throw new UploadError("LOGISTICS_DOCUMENT_CONFLICT", 409, "persist", "Загрузка отменена", "conflict");
       if (reserved.state === "READY") return { document: logisticsDocumentView(reserved), repeated: true };
-      options.onPhase?.("storage-original");
+      onPhase?.("storage-original");
       await storage.put(reserved, input.bytes);
-      options.onPhase?.("persist");
+      onPhase?.("persist");
       return transaction(async tx => {
-        const actor = await requireLogisticsActor(actorId, tx);
+        const actor = await requireLogisticsActor(actorId, tx, "manage", source);
         await lockUpload(tx, data.clientMutationId);
         await lockLogisticsTrip(tx, data.tripId);
         const trip = await requireTrip(tx, data.tripId);
@@ -82,7 +84,7 @@ export function createLogisticsDocumentService({ transaction, storage }: {
         if (row.state === "READY") return { document: logisticsDocumentView(row), repeated: true };
         const ready = await tx.logisticsDocument.update({ where: { id: row.id }, data: { state: "READY", readyAt: new Date() } });
         await writeChangeLogInTransaction(tx, { id: `logistics-document:${row.id}`, actorType: "user", actorId,
-          actorName: actor.name, entity: "logisticsDocument", entityId: row.id, action: "create",
+          actorName: actor.name, source, entity: "logisticsDocument", entityId: row.id, action: "create",
           reversal: logisticsDocumentUndoCommand({ documentId: row.id, tripId: row.tripId, expectedRevision: ready.visibilityRevision, hide: true }),
           newValue: { tripId: row.tripId, stage: row.stage, ttnNumber: row.ttnNumber, fileName: row.fileName,
             mimeType: row.mimeType, size: row.size, contentHash } }, { ...logisticsJournalHints(trip),

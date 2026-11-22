@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { LOGISTICS_DELETE_ROLES } from "@/lib/logistics-access";
-import { requireRole } from "@/server/require-role";
+import { requireFinanceRole } from "@/server/require-role";
+import { financeSessionSource } from "@/server/telegram/finance-session";
 import { UploadError } from "@/server/files/upload-result";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 import { dispatchEvent } from "@/server/plugins/events";
@@ -10,8 +11,8 @@ import { deleteLogisticsTripCore } from "./delete-core";
 
 export async function deleteLogisticsTrip(input: unknown) {
   try {
-    const session = await requireRole(LOGISTICS_DELETE_ROLES);
-    const result = await deleteLogisticsTripCore(session.user.id, input, withTaskTransaction);
+    const session = await requireFinanceRole(LOGISTICS_DELETE_ROLES);
+    const result = await deleteLogisticsTripCore(session.user.id, input, withTaskTransaction, financeSessionSource(session));
     await (async () => {
       if (result.eventId) await dispatchEvent(result.eventId).catch(() => {});
       revalidatePath("/logistics"); revalidatePath(`/logistics/${result.tripId}`); revalidatePath("/finance", "layout");
