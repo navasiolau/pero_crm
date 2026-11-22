@@ -38,7 +38,7 @@ test('web package smoke actually reads every permitted source asset, limits and 
   assert.equal(processState.exitCode, undefined); assert.deepEqual(logs, [result]);
 });
 
-test('missing package entry, specifications and limits fail through genuine Node package resolution', () => {
+test('missing package entry, specifications, contract instructions and limits fail through genuine Node package resolution', () => {
   const directory = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'pero-kp-package-'))), load = createRequire(path.join(directory, 'caller.cjs'));
   try {
     const source = path.dirname(createRequire(import.meta.url).resolve('@pero/kp-template'));
@@ -51,6 +51,9 @@ test('missing package entry, specifications and limits fail through genuine Node
     copyFileSync(path.join(source, 'furniture-specifications.js'), path.join(target, 'furniture-specifications.js'));
     assert.throws(() => templateSmoke.verifyPackage(templateSmoke.expectedPackage(), load), error => error.code === 'MODULE_NOT_FOUND' && error.kpPhase === 'require' && error.message.includes('assets/public/js/furniture-specifications.js'));
     copyFileSync(path.join(source, 'assets/public/js/furniture-specifications.js'), path.join(target, 'assets/public/js/furniture-specifications.js'));
+    assert.throws(() => templateSmoke.verifyPackage(templateSmoke.expectedPackage(), load), error => error.code === 'MODULE_NOT_FOUND' && error.kpPhase === 'require' && error.message.includes('assets/lib/contract-operation-instructions.js'));
+    mkdirSync(path.join(target, 'assets/lib'), { recursive: true });
+    copyFileSync(path.join(source, 'assets/lib/contract-operation-instructions.js'), path.join(target, 'assets/lib/contract-operation-instructions.js'));
     assert.throws(() => templateSmoke.verifyPackage(templateSmoke.expectedPackage(), load), error => error.code === 'MODULE_NOT_FOUND' && error.kpPhase === 'require' && error.message.includes('limits.cjs'));
   } finally {
     assert.equal(path.dirname(directory), realpathSync(os.tmpdir())); assert.ok(path.basename(directory).startsWith('pero-kp-package-'));
