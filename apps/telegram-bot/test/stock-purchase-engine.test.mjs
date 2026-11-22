@@ -70,7 +70,10 @@ test('optional receipt file retries upload and commit exactly once, stale contro
  const retry=button(id,value=>value.includes(':docretry:'));assert.ok(retry);assert.ok(retry.length<=64);
  await handleUpdate(cb(id,retry));await handleUpdate(cb(id,button(id,value=>value.endsWith(':continue'))));const confirm=button(id,value=>value.endsWith(':ok'));assert.ok(confirm);
  assert.match(sent.at(-1).text,/Чек.pdf/);await handleUpdate(cb(id,skip));
- loseAck=true;await handleUpdate(cb(id,confirm));await handleUpdate(cb(id,confirm));
+ loseAck=true;await handleUpdate(cb(id,confirm));
+ const recover = button(id,value=>value.startsWith('fretry:'));
+ assert.ok(recover);
+ await handleUpdate(cb(id,recover));
  const writes=calls.filter(row=>row.path.endsWith('/stock-receipts')&&row.actor==='actor-'+id);
  assert.equal(writes.length,2);assert.equal(writes[0].body.reportDocumentIds.length,1);assert.deepEqual(writes[0].body,writes[1].body);
  const files=calls.filter(row=>row.path.endsWith('/documents/upload')&&row.actor==='actor-'+id);

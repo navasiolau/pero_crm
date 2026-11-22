@@ -1,6 +1,6 @@
 import { submitFinanceCommand } from "./finance-checkpoint";
 import { randomUUID } from "node:crypto";
-import { BOT_COMMAND } from "./commands";
+import { financeSaveFailure } from "./finance-recovery";
 import { crm, CrmError, type DirectoryItem, type StockReceiptQuote } from "./crm";
 import { dialogChoices, dialogChoice, positiveDecimalDraft, CANCEL_ROW as cancel, type DialogContext } from "./dialog-choices";
 import { formatMoney } from "./views";
@@ -184,13 +184,12 @@ export async function stockPurchaseCallback(ctx: FlowContext, chatId: number, ac
         if (ctx.getDialog(chatId) === dialog) ctx.setDialog(chatId,null);
         await ctx.reply(chatId,`✅ Материал принят на склад. Из кассы списано ${formatMoney(dialog.quote.amount,dialog.quote.currency)}.`);
       } else {
-        const retryHint = "outcome" in response && response.outcome === "ROLLED_BACK"
-          ? "Проверьте данные и повторите подтверждение."
-          : `Проверьте результат командой ${BOT_COMMAND.verifyOperation}.`;
-        await ctx.reply(chatId, `❌ ${response.error ?? "Приход не подтверждён"}. ${retryHint}`);
+        const notice = financeSaveFailure(chatId, actorId, response.error ?? "Приход не подтверждён");
+        await ctx.reply(chatId, notice.text, notice.buttons);
       }
     } catch (error) {
-      await ctx.reply(chatId, `❌ ${error instanceof CrmError ? error.message : "Ответ не получен"}. Проверьте результат командой ${BOT_COMMAND.verifyOperation}.`);
+      const notice = financeSaveFailure(chatId, actorId, error instanceof CrmError ? error.message : "Ответ не получен");
+      await ctx.reply(chatId, notice.text, notice.buttons);
     }
   } finally { dialog.busy = false; }
 }
