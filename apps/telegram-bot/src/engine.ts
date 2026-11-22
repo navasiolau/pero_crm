@@ -1,6 +1,7 @@
 import { config } from "./config";
 import { BOT_COMMAND, canonicalBotCommand } from "./commands";
 import { pendingFinanceCommand, submitFinanceCommand } from "./finance-checkpoint";
+import { FINANCE_RECOVERY_ACTION, financeRecoveryButtons, financeSaveFailure } from "./finance-recovery";
 import { CANCEL_BUTTON, dialogChoices, dialogChoice, isTestChoice } from "./dialog-choices";
 import {randomUUID} from "node:crypto";
 import { crm, CrmError, type BotAccess, type ProjectRef, type ProjectBaseline } from "./crm";
@@ -94,7 +95,7 @@ const dialogs = new Map<string, Dialog>();
 const draftHistory = new Map<string, DraftHistory>();
 const observedActor = new Map<string, { userId: string; binding?: string }>();
 const callbackMessages = new Map<string, Map<number, SentButtons>>();
-const FINANCE_CALLBACK_ACTIONS = new Set(["payin", "payout", "payproj", "paygeneral", "paylist", "payoptions", "cur", "cash", "art", "nocomment", "payok", "docretry", "doccontinue", "docexclude", "sp"]);
+const FINANCE_CALLBACK_ACTIONS = new Set(["payin", "payout", "payproj", "paygeneral", "paylist", "payoptions", "cur", "cash", "art", "nocomment", "payok", "docretry", "doccontinue", "docexclude", "sp", FINANCE_RECOVERY_ACTION]);
 const PROJECT_CALLBACK_ACTIONS = new Set(["proj", "stage", "st", "edit", "ed", "mgr", "cli", "npc"]);
 const DIALOG_ACCESS = {
   newProject: "projects", stage: "projects", edit: "projects",
@@ -297,22 +298,6 @@ async function handleCommand(
   args: string[],
 ): Promise<void> {
   switch (cmd) {
-    case BOT_COMMAND.verifyOperation: {
-      if (!session.access.finance) return reply(chatId, session.access.deniedMessage);
-      const pending = pendingFinanceCommand(chatId, session.userId);
-      if (!pending) {
-        await reply(chatId, "Нет операций, которые нужно проверить.");
-        return;
-      }
-      try {
-        const result = await submitFinanceCommand(chatId, pending);
-        if (result.ok) setDialog(chatId, null);
-        await reply(chatId, result.ok ? "✅ Операция подтверждена в CRM." : `❌ ${result.error ?? "Результат неизвестен"}`);
-      } catch {
-        await reply(chatId, `Подтверждение недоступно. Позже используйте ${BOT_COMMAND.verifyOperation}.`);
-      }
-      return;
-    }
     case BOT_COMMAND.stockIssue:
     case BOT_COMMAND.stockReturn:
     case BOT_COMMAND.inventoryReceipt: {
@@ -430,7 +415,6 @@ function helpText(access: BotAccess): string {
       "/приход [номер] [сумма] — приход по проекту или организации",
       "/расход [номер] [сумма] — расход по проекту или организации",
       "/закупка — приход материала с оплатой из кассы",
-      `${BOT_COMMAND.verifyOperation} — проверить, сохранилась ли операция`,
     );
   }
   if (access.finance && !access.projects) lines.push("/проекты [поиск] — найти проект для платежа");
@@ -558,10 +542,32 @@ async function newProjectText(
 // — Платёж (приход/расход) —
 
 async function blockPendingFinance(chatId: number, session: Session) {
-  const pending = pendingFinanceCommand(chatId, session.userId);
-  if (!pending) return false;
-  await reply(chatId, `Сначала проверьте незавершённую операцию командой ${BOT_COMMAND.verifyOperation}.`);
+  const buttons = financeRecoveryButtons(chatId, session.userId);
+  if (!buttons) return false;
+  await reply(chatId, "Предыдущая операция ещё не подтверждена. Повторите её сохранение.", buttons);
   return true;
+}
+
+async function retryPendingFinance(chatId: number, session: Session, mutationId: string) {
+  const pending = pendingFinanceCommand(chatId, session.userId);
+  if (!pending || pending.input.clientMutationId !== mutationId) {
+    return reply(chatId, "Кнопка устарела. Если сохранение ещё не подтверждено, откройте операцию заново.");
+  }
+  try {
+    const result = await submitFinanceCommand(chatId, pending);
+    if (result.ok) {
+      const dialog = getDialog(chatId);
+      const draftId = dialog?.kind === "payment" ? dialog.clientMutationId
+        : dialog?.kind === "stockPurchase" ? dialog.input.clientMutationId : undefined;
+      if (draftId === mutationId) setDialog(chatId, null);
+      return reply(chatId, "✅ Операция сохранена в CRM.");
+    }
+    const notice = financeSaveFailure(chatId, session.userId, result.error ?? "Результат пока неизвестен");
+    return reply(chatId, notice.text, notice.buttons);
+  } catch {
+    const notice = financeSaveFailure(chatId, session.userId, "Ответ о сохранении не получен");
+    return reply(chatId, notice.text, notice.buttons);
+  }
 }
 
 async function startPayment(
@@ -963,6 +969,9 @@ async function dispatchCallback(
   action: string,
   rest: string[],
 ): Promise<void> {
+  if (action === FINANCE_RECOVERY_ACTION) {
+    return retryPendingFinance(chatId, session, rest[0]);
+  }
   if(action==="sw"){
     const dialog=getDialog(chatId);
     await stockMovementCallback({reply,getDialog,setDialog},chatId,session.userId,dialog?.kind==="stockMovement"?dialog:undefined,rest);return;
@@ -1315,19 +1324,17 @@ async function dispatchCallback(
       ...paymentReportDocumentInput(dialog),
       ...(dialog.comment ? { comment: dialog.comment } : {}),
     } });
-    if (result.ok && getDialog(chatId) === dialog) setDialog(chatId, null);
-    const label = dialog.direction === "INCOME" ? "Приход" : "Расход";
-    const retryHint = "outcome" in result && result.outcome === "ROLLED_BACK"
-      ? "Проверьте данные и повторите подтверждение."
-      : `Проверьте результат командой ${BOT_COMMAND.verifyOperation}.`;
-    await reply(
-      chatId,
-      result.ok
-        ? `✅ ${label} ${formatMoney(dialog.amount, dialog.currency)} · ${paymentContext(dialog)} — записано`
-        : `❌ ${result.error ?? "Операция не подтверждена"}. ${retryHint}`,
-    );
+    if (result.ok) {
+      if (getDialog(chatId) === dialog) setDialog(chatId, null);
+      const label = dialog.direction === "INCOME" ? "Приход" : "Расход";
+      await reply(chatId, `✅ ${label} ${formatMoney(dialog.amount, dialog.currency)} · ${paymentContext(dialog)} — записано`);
+    } else {
+      const notice = financeSaveFailure(chatId, session.userId, result.error ?? "Операция не подтверждена");
+      await reply(chatId, notice.text, notice.buttons);
+    }
     } catch (error) {
-      await reply(chatId, `❌ ${error instanceof CrmError ? error.message : "Ответ о сохранении не получен"}. Проверьте результат командой ${BOT_COMMAND.verifyOperation}.`);
+      const notice = financeSaveFailure(chatId, session.userId, error instanceof CrmError ? error.message : "Ответ о сохранении не получен");
+      await reply(chatId, notice.text, notice.buttons);
     } finally { dialog.busy = false; }
     return;
   }

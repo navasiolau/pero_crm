@@ -234,36 +234,64 @@ test('back from a manual date restores the payment without allowing old confirma
   assert.equal(body.comment, "Аванс клиента");
 });
 
-test("the command list uses the clearer names and the old retry name still works", async () => {
+test("the command list omits recovery and the old slash commands are removed", async () => {
   const chat = 8845;
   roles.set(String(chat), ["ADMIN"]);
   await handleUpdate(message(chat, "/команды"));
   const help = sent.at(-1).text;
-  assert.match(help, /^\/проверить_операцию — проверить, сохранилась ли операция$/m);
   assert.match(help, /^\/возврат_на_склад — вернуть ранее выданный материал$/m);
-  assert.doesNotMatch(help, /^\/(повтор|возврат) —/m);
-  await handleUpdate(message(chat, "/повтор"));
-  assert.match(sent.at(-1).text, /Нет операций, которые нужно проверить/);
+  for (const command of ["/проверить_операцию", "/повтор", "/retry"]) {
+    assert.ok(!help.includes(command));
+    await handleUpdate(message(chat, command));
+    assert.match(sent.at(-1).text, /Неизвестная команда/);
+    assert.equal(sent.at(-1).reply_markup, undefined);
+  }
 });
 
-test('after restarting engine a lost payment acknowledgement is retried with the stored payload',async()=>{
- const chat=8834;roles.set(String(chat),['ACCOUNTANT']);
- await handleUpdate(message(chat,'/приход 205 100'));
- await handleUpdate(callback(chat,'cur:BYN'));await handleUpdate(callback(chat,'cash:cash'));
- await handleUpdate(message(chat,'—'));losePayment=true;
- await handleUpdate(callback(chat,latestButton(chat,'payok:')));
- const first=calls.filter(row=>row.path.endsWith('/payments')&&row.actor==='actor-'+chat).at(-1);
- await handleUpdate(callback(chat,latestButton(chat,'draftback:')));
- assert.match(sent.at(-1).text,/проверить_операцию/);
- const require=createRequire(import.meta.url);
- for(const module of ['../dist/engine.js','../dist/finance-checkpoint.js'])delete require.cache[require.resolve(module)];
- const restarted=require('../dist/engine.js').handleUpdate;
- await restarted(message(chat,'/приход 205 100'));
- assert.match(sent.at(-1).text,/проверить_операцию/);
- await restarted(message(chat,'/проверить_операцию'));
- assert.match(sent.at(-1).text,/подтверждена/);
- const attempts=calls.filter(row=>row.path.endsWith('/payments')&&row.actor==='actor-'+chat);
- assert.equal(attempts.length,2);assert.deepEqual(attempts[1],first);
+test("a contextual button retries the stored payment after restart", async () => {
+  const chat = 8834;
+  roles.set(String(chat), ["ACCOUNTANT"]);
+  bindings.set(String(chat), "finance-recovery:1:0");
+  const press = (match, sentId = sent.length) => {
+    const button = sent[sentId - 1]?.reply_markup?.inline_keyboard?.flat().find(match);
+    assert.ok(button?.callback_data);
+    const update = callback(chat, button.callback_data);
+    update.callback_query.message.message_id = sentId;
+    return update;
+  };
+  const recovery = button => button.text === "Повторить сохранение";
+  const attempts = () => calls.filter(row => row.path.endsWith("/payments") && row.actor === "actor-" + chat);
+
+  await handleUpdate(message(chat, "/приход 205 100"));
+  await handleUpdate(press(button => button.callback_data === "cur:BYN"));
+  await handleUpdate(press(button => button.callback_data === "cash:cash"));
+  await handleUpdate(message(chat, "—"));
+  const summary = sent.length;
+  losePayment = true;
+  await handleUpdate(press(button => button.callback_data.startsWith("payok:")));
+  assert.equal(attempts().length, 1);
+  assert.match(sent.at(-1).text, /Повторите сохранение кнопкой ниже/);
+  const oldRecovery = press(recovery);
+  await handleUpdate(press(button => button.text === "← Назад", summary));
+  assert.match(sent.at(-1).text, /Предыдущая операция ещё не подтверждена/);
+
+  const require = createRequire(import.meta.url);
+  for (const module of ["../dist/engine.js", "../dist/finance-checkpoint.js", "../dist/finance-recovery.js"]) {
+    delete require.cache[require.resolve(module)];
+  }
+  const restarted = require("../dist/engine.js").handleUpdate;
+  await restarted(oldRecovery);
+  assert.match(sent.at(-1).text, /Кнопка устарела/);
+  assert.equal(attempts().length, 1);
+  await restarted(message(chat, "/приход 205 500"));
+  assert.equal(attempts().length, 1);
+  const newRecovery = press(recovery);
+  await restarted(newRecovery);
+  assert.match(sent.at(-1).text, /сохранена в CRM/);
+  await restarted(newRecovery);
+  assert.match(sent.at(-1).text, /Кнопка устарела/);
+  assert.equal(attempts().length, 2);
+  assert.deepEqual(attempts()[1], attempts()[0]);
 });
 
 test('the Finance button uses a Mini App only for a linked financial user in a private chat', async () => {
@@ -317,10 +345,11 @@ test("linked user without section permissions receives only the CRM denial", asy
   const chat = 8843;
   roles.set(String(chat), ["MANAGER"]);
   const before = sent.length;
-  for (const text of ["/финансы", "/расход", "/закупка", "/повтор"]) {
+  for (const text of ["/финансы", "/расход", "/закупка"]) {
     await handleUpdate(message(chat, text));
   }
   await handleUpdate(callback(chat, "payout:a"));
+  await handleUpdate(callback(chat, "fretry:a"));
   assert.deepEqual(sent.slice(before).map(item => ({ text: item.text, buttons: item.reply_markup })), Array.from({ length: 5 }, () => ({
     text: deniedMessage,
     buttons: undefined,
