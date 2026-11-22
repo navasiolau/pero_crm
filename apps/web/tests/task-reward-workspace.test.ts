@@ -16,7 +16,8 @@ import { authConfig } from "../src/auth.config";
 import { canReceiveNotificationContent } from "../src/lib/notification-access";
 import { scopeNotificationContent } from "../src/server/access/notification-visibility";
 import { receivableTypesFor, orgRolesFor } from "../src/server/notifications/notify";
-import { botAllowed, requireBotFinance, requireBotManager } from "../src/server/telegram/bot-api";
+import { requireBotFinance, requireBotManager } from "../src/server/telegram/bot-api";
+import { telegramBotUser } from "../src/server/telegram/access";
 import { maskProductionRead } from "../src/server/access/production-read-projection";
 import { getProductPercentageView } from "../src/server/product-percentage-pay/queries";
 
@@ -193,7 +194,7 @@ test('manager receives project commerce and own payroll but no global financial 
  assert.equal(canReceiveNotificationContent(['MANAGER'],'project.created'),true);assert.equal(canReceiveNotificationContent(['MANAGER'],'payroll.payout'),true);assert.equal(canReceiveNotificationContent(['PROCUREMENT'],'file.added'),true);
 });
 test('bot financial channel does not grant operational manager writes',()=>{
- for(const roles of [['ACCOUNTANT'],['PROCUREMENT']] as const){const actor={id:'a',name:'A',source:'telegram' as const,roles:[...roles]};assert.equal(botAllowed(actor.roles),true);assert.equal(requireBotFinance(actor),null);assert.equal(requireBotManager(actor)?.status,403);}
+ for(const roles of [['ACCOUNTANT'],['PROCUREMENT']] as const){const actor={id:'a',name:'A',source:'telegram' as const,roles:[...roles]};const state=telegramBotUser(actor);assert.equal(state.botAllowed,true);assert.equal(state.access.finance,true);assert.equal(state.access.projects,false);assert.equal(requireBotFinance(actor),null);assert.equal(requireBotManager(actor)?.status,403);}
  assert.equal(requireBotFinance({id:'m',name:'M',source:'telegram',roles:['MANAGER']})?.status,403);
 });
 

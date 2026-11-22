@@ -3,12 +3,13 @@ import { prisma } from "@/lib/prisma";
 import { hasAnyRole, WAREHOUSE_MANAGE_ROLES } from "@/lib/roles";
 import { authenticate, isErrorResponse } from "@/server/api/auth";
 import { resolveBotActor, isActorError, domainError } from "@/server/telegram/bot-api";
+import { TELEGRAM_SECTION_DENIED } from "@/server/telegram/access";
 import { createStockMovementCore } from "@/server/warehouse/movement-service";
 import { loadWarehouseChoices } from "@/server/warehouse/movement-choices";
 async function actorFor(request:Request,scope:"read"|"write"){
  const auth=await authenticate(request,scope);if(isErrorResponse(auth))return auth;
  const actor=await resolveBotActor(request);if(isActorError(actor))return actor;
- if(!hasAnyRole(actor.roles,WAREHOUSE_MANAGE_ROLES))return NextResponse.json({ok:false,error:"Недостаточно прав"},{status:403});
+ if(!hasAnyRole(actor.roles,WAREHOUSE_MANAGE_ROLES))return NextResponse.json({ok:false,error:TELEGRAM_SECTION_DENIED},{status:403});
  return actor;
 }
 export async function GET(request:Request){

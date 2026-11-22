@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { prisma } from "@/lib/prisma";
-
 import { authenticate, isErrorResponse } from "@/server/api/auth";
-import { botAllowed } from "@/server/telegram/bot-api";
+import { findActiveTelegramLink, telegramBindingVersion, telegramBotUser } from "@/server/telegram/access";
 
 // GET /api/v1/bot/session?chatId=<telegram chat id> — кто привязан к чату.
 // Scope: read. Непривязанный/неактивный пользователь → { found: false }
@@ -17,24 +15,14 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, error: "Укажите chatId" }, { status: 400 });
   }
 
-  const link = await prisma.telegramLink.findUnique({
-    where: { chatId },
-    include: {
-      user: { select: { id: true, name: true, roles: true, active: true, sessionVersion: true } },
-    },
-  });
-  if (!link?.linkedAt || link.revokedAt || !link.user.active) {
+  const link = await findActiveTelegramLink({ chatId });
+  if (!link) {
     return NextResponse.json({ ok: true, found: false });
   }
   return NextResponse.json({
     ok: true,
     found: true,
-    binding: `${link.id}:${link.generation}:${link.user.sessionVersion}`,
-    user: {
-      id: link.user.id,
-      name: link.user.name,
-      roles: link.user.roles,
-      botAllowed: botAllowed(link.user.roles),
-    },
+    binding: telegramBindingVersion(link.id, link.generation, link.user.sessionVersion),
+    user: telegramBotUser(link.user),
   });
 }

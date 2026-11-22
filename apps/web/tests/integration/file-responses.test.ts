@@ -351,7 +351,13 @@ test("security.routes: credentials, Bearer, Telegram и команды чере�
       assert.deepEqual(await f.db.telegramLink.findMany({ orderBy: { id: "asc" } }), baseline, "Telegram linkage drift: " + scenario);
     }
     const linked = await api("/api/v1/bot/link", write.raw, "POST", { code: linkCode, chatId, username: "fixture" }); assert.equal(linked.status, 200);
-    assert.deepEqual((await linked.json()).user, { id: engineer.id, name: engineer.name, roles: ["ENGINEER"], botAllowed: false });
+    assert.deepEqual((await linked.json()).user, {
+      id: engineer.id, name: engineer.name, roles: ["ENGINEER"], botAllowed: false,
+      access: {
+        projects: false, finance: false, warehouse: false,
+        deniedMessage: "Вам не доступен этот раздел, если это ошибка - обратитесь к Администратору",
+      },
+    });
     const saved = await f.db.telegramLink.findUniqueOrThrow({ where: { userId: engineer.id } });
     assert.equal(saved.chatId, chatId); assert.equal(saved.linkCode, null); assert.equal(saved.linkCodeExpiresAt, null); assert.ok(saved.linkedAt);
     assert.equal((await api("/api/v1/bot/link", write.raw, "POST", { code: linkCode, chatId })).status, 400);

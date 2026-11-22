@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { botUser } from "./user-fixture.mjs";
 process.env.BOT_RECOVERY_TEST='1';process.env.TELEGRAM_API_ORIGIN='http://127.0.0.1:9080';
 process.env.TELEGRAM_BOT_TOKEN='fixture-token';process.env.CRM_BASE_URL='http://127.0.0.1:9081';process.env.CRM_API_TOKEN='fixture-crm-token';
 const sent=[],calls=[],receipts=new Map(),roles=new Map();let updateId=1,loseAck=false,legacy=false;
@@ -8,7 +9,7 @@ globalThis.fetch=async(input,options={})=>{
  calls.push({path:url.pathname,body,actor});let value;
  if(url.pathname.endsWith('/sendMessage')){sent.push(body);value={ok:true,result:{message_id:sent.length,chat:{id:body.chat_id}}};}
  else if(url.pathname.endsWith('/answerCallbackQuery'))value={ok:true,result:true};
- else if(url.pathname==='/api/v1/bot/session'){const id=url.searchParams.get('chatId');value={found:true,user:{id:'actor-'+id,name:'Actor',roles:roles.get(id)??['PROCUREMENT'],botAllowed:true}};}
+ else if(url.pathname==='/api/v1/bot/session'){const id=url.searchParams.get('chatId');value={found:true,user:botUser('actor-'+id,'Actor',roles.get(id)??['PROCUREMENT'])};}
  else if(url.pathname==='/api/v1/bot/stock-movements'&&options.method==='GET'){
   const kind=url.searchParams.get('kind'),canMoney=!(roles.get(actor?.slice(6))??[]).includes('MANAGER');
   value={ok:true,items:kind==='products'?[{id:'product',label:'205.1'}]:kind==='materials'?[{id:'material',label:'Петля',unit:'шт',available:5}]

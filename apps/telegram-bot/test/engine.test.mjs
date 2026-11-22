@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { botUser } from "./user-fixture.mjs";
 
 process.env.BOT_RECOVERY_TEST = "1";
 process.env.TELEGRAM_API_ORIGIN = "http://127.0.0.1:9080";
@@ -32,11 +33,11 @@ globalThis.fetch = async (input, options = {}) => {
   } else if (url.pathname.endsWith("/answerCallbackQuery")) {
     value = { ok: true, result: true };
   } else if (url.pathname === "/api/v1/bot/link") {
-    value = { ok: true, user: { name: "Linked", roles: ["WORKER"], botAllowed: false } };
+    value = { ok: true, user: botUser("worker-1", "Linked", ["WORKER"]) };
   } else if (url.pathname === "/api/v1/bot/session") {
     value = url.searchParams.get("chatId") === "502"
-      ? { ok: true, found: true, user: { id: "worker-1", name: "Worker", roles: ["WORKER"], botAllowed: false } }
-      : { ok: true, found: true, user: { id: "admin-1", name: "Admin", roles: ["ADMIN"], botAllowed: true } };
+      ? { ok: true, found: true, user: botUser("worker-1", "Worker", ["WORKER"]) }
+      : { ok: true, found: true, user: botUser("admin-1", "Admin", ["ADMIN"]) };
   } else if (url.pathname === "/api/v1/bot/directory") {
     const type = url.searchParams.get("type");
     value = type === "clients" ? { ok: true, items: [{ id: "client-1", label: "Client" }] }

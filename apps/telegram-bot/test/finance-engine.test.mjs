@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { botUser, deniedMessage } from "./user-fixture.mjs";
 import test from 'node:test';
 import {createRequire} from 'node:module';
 import {randomUUID} from 'node:crypto';
@@ -18,7 +19,8 @@ globalThis.fetch=async(input,options={})=>{
  else if(url.pathname.endsWith('/answerCallbackQuery'))result={ok:true,result:true};
  else if(url.pathname.endsWith('/getFile'))result={ok:true,result:{file_path:'documents/file.pdf',file_size:4}};
  else if(url.pathname.startsWith('/file/'))return new Response('%PDF',{headers:{'content-length':'4'}});
- else if(url.pathname==='/api/v1/bot/session'){const id=url.searchParams.get('chatId');result=unlinked.has(id)?{ok:true,found:false}:{ok:true,found:true,binding:bindings.get(id),user:{id:'actor-'+id,name:'Actor',roles:roles.get(id)??['PROCUREMENT'],botAllowed:true}};}
+ else if(url.pathname==='/api/v1/bot/session'){const id=url.searchParams.get('chatId');result=unlinked.has(id)?{ok:true,found:false}:{ok:true,found:true,binding:bindings.get(id),user:botUser('actor-'+id,'Actor',roles.get(id)??['PROCUREMENT'])};}
+ else if(url.pathname==='/api/v1/bot/link'){result={ok:false,error:'Код не найден или истёк'};}
  else if(url.pathname==='/api/v1/bot/projects'){
   const q=url.searchParams.get('q');
   result={ok:true,projects:q==='Шкаф'?[{id:'older',number:'204',title:'Шкаф в холл',currency:'BYN'},{id:'newer',number:'206',title:'Шкаф в спальню',currency:'BYN'}]:[{id:'project',number:'205',title:'Order',currency:'BYN'}]};
@@ -220,6 +222,7 @@ test('the Finance button uses a Mini App only for a linked financial user in a p
  assert.equal(sent.length,before);
  roles.set(String(chat),['MANAGER']);
  await handleUpdate(message(chat,'/финансы'));
+ assert.equal(sent.at(-1).text, deniedMessage);
  assert.equal(sent.at(-1).reply_markup,undefined);
 });
 
@@ -242,13 +245,31 @@ test('native bot rejects callbacks from an older binding even for the same CRM a
 });
 
 
-test('unlinked private chat gets only the safe Finance onboarding button', async () => {
- const chat=8842;unlinked.add(String(chat));
- await handleUpdate(message(chat,'/start'));
- assert.deepEqual(sent.at(-1).reply_markup.inline_keyboard[0][0],{text:'Подключить финансы',web_app:{url:'https://crm.invalid/telegram/finance'}});
- assert.doesNotMatch(sent.at(-1).text,/платёж|Actor/);
- const before=sent.length;
- await handleUpdate(message(chat,'/проекты'));
- await handleUpdate(message(-chat,'/start',{from:{id:chat}}));
- assert.equal(sent.length,before);
+test("unlinked chats receive no reply or callback acknowledgement", async () => {
+  const chat = 8842;
+  unlinked.add(String(chat));
+  const before = sent.length;
+  const firstCall = calls.length;
+  for (const text of ["/start", "/финансы", "/help", "/проекты", "Привет", "/start BadCode"]) {
+    await handleUpdate(message(chat, text));
+  }
+  await handleUpdate(message(chat, null, { document: { file_id: "example", mime_type: "application/pdf" } }));
+  await handleUpdate(callback(chat, "payout:a"));
+  await handleUpdate(message(-chat, "/start", { from: { id: chat } }));
+  assert.equal(sent.length, before);
+  assert.deepEqual(new Set(calls.slice(firstCall).map(call => call.path)), new Set(["/api/v1/bot/session", "/api/v1/bot/link"]));
+});
+
+test("linked user without section permissions receives only the CRM denial", async () => {
+  const chat = 8843;
+  roles.set(String(chat), ["MANAGER"]);
+  const before = sent.length;
+  for (const text of ["/финансы", "/расход", "/закупка", "/повтор"]) {
+    await handleUpdate(message(chat, text));
+  }
+  await handleUpdate(callback(chat, "payout:a"));
+  assert.deepEqual(sent.slice(before).map(item => ({ text: item.text, buttons: item.reply_markup })), Array.from({ length: 5 }, () => ({
+    text: deniedMessage,
+    buttons: undefined,
+  })));
 });

@@ -3,10 +3,25 @@ import { config } from "./config";
 // Клиент REST CRM /api/v1/bot/*. Ответы домена всегда {ok, error?, ...} —
 // HTTP 200/4xx; исключения бросаем только для инфраструктурных сбоев.
 
+export interface BotAccess {
+  projects: boolean;
+  finance: boolean;
+  warehouse: boolean;
+  deniedMessage: string;
+}
+
+interface BotUser {
+  id: string;
+  name: string;
+  roles: string[];
+  botAllowed: boolean;
+  access: BotAccess;
+}
+
 export interface SessionInfo {
   found: boolean;
   binding?: string;
-  user?: { id: string; name: string; roles: string[]; botAllowed: boolean };
+  user?: BotUser;
 }
 
 export interface OrdinaryProjectPatch {projectId:string;field:"title"|"address"|"managerId";value:string|null;expectedValue:string|null;clientMutationId:string;}
@@ -151,8 +166,7 @@ export const crm = {
   link(code: string, chatId: string, username?: string) {
     return request<{
       ok: boolean;
-      error?: string;
-      user?: { name: string; roles: string[]; botAllowed: boolean };
+      user?: BotUser;
     }>("POST", "/link", { code, chatId, username });
   },
   paymentProject(actorId: string, ref: string) {

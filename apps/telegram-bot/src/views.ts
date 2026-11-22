@@ -1,4 +1,3 @@
-export const WAREHOUSE_ROLES=["ADMIN","DIRECTOR","MANAGER","PROCUREMENT"];
 import type { ProjectCard, FinanceInfo } from "./crm";
 
 // Подписи и форматирование для сообщений бота. Часть констант повторяет
@@ -36,12 +35,6 @@ export const STAGE_ORDER = [
 ];
 
 export const CURRENCIES = ["BYN", "RUB", "USD", "EUR"];
-
-export const FINANCE_ROLES = ["ADMIN", "DIRECTOR", "ACCOUNTANT", "PROCUREMENT"];
-
-export function hasAny(roles: string[], needed: string[]): boolean {
-  return needed.some((role) => roles.includes(role));
-}
 
 export function rolesLabel(roles: string[]): string {
   return roles
