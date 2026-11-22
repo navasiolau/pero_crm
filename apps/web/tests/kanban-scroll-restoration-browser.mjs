@@ -36,9 +36,10 @@ window.__rows=[...Array.from({length:24},(_,i)=>({...base,id:'row-'+i,number:num
  {...base,id:'last',number:'900',stage:'REFUSED',status:'DONE'}];
 window.__user='qa212-user';window.__hold=false;window.__errors=[];
 function App(){const [route,setRoute]=React.useState(location.pathname+location.search),[revision,refresh]=React.useState(0);
+ const restoredFromHistory=React.useRef(false);
  window.__refresh=()=>refresh(v=>v+1);
- window.__navigate=href=>{history.pushState({},'',href);setRoute(href);window.scrollTo(0,0)};
- React.useEffect(()=>{const back=()=>{setRoute(location.pathname+location.search);window.scrollTo(0,0)};window.addEventListener('popstate',back);return()=>window.removeEventListener('popstate',back)},[]);
+ window.__navigate=href=>{restoredFromHistory.current=false;history.pushState({},'',href);setRoute(href);window.scrollTo(0,0)};
+ React.useEffect(()=>{const back=()=>{restoredFromHistory.current=true;setRoute(location.pathname+location.search);window.scrollTo(0,0)};window.addEventListener('popstate',back);return()=>window.removeEventListener('popstate',back)},[]);
  const url=new URL(route,location.origin),query=normalizeListQuery(section,url.search.slice(1)),q=new URLSearchParams(query).get('q')||'';
  if(projectFixture){
   if(url.pathname.startsWith('/products/')){
@@ -46,7 +47,7 @@ function App(){const [route,setRoute]=React.useState(location.pathname+location.
    return <main><h1>Изделие проекта</h1><a href={destination.href} onClick={e=>{e.preventDefault();window.__navigate(destination.href)}}>{destination.label}</a></main>;
   }
   // Next может повторно использовать серверную вкладку из записи до replaceState.
-  const projectId=url.pathname.split('/')[2],tab=url.searchParams.has('returnTo')?'overview':resolveProjectTab(url.searchParams.get('tab'),['overview','products']);
+  const projectId=url.pathname.split('/')[2],tab=restoredFromHistory.current&&url.searchParams.has('returnTo')?'overview':resolveProjectTab(url.searchParams.get('tab'),['overview','products']);
   return <main key={projectId} style={{padding:16,marginLeft:innerWidth>=768?240:0}}>
    <ProjectTabs initialTab={tab}><TabsList><TabsTrigger value='overview'>Общее</TabsTrigger><TabsTrigger value='products'>Изделия</TabsTrigger></TabsList>
    <TabsContent value='overview'>Общее о проекте</TabsContent>
@@ -155,7 +156,7 @@ export async function runScrollRestorationBrowser({ smoke = false } = {}) {
       const coverBefore = await arrange(page, true, true);
       await card.getByRole('button', { name: 'Открыть изделие Возврат к этой карточке' }).click();
       await page.getByRole('link', { name: 'Назад к изделиям проекта' }).click();
-      await expect(page).toHaveURL(origin + '/projects/parent?tab=products');
+      await expect(page).toHaveURL(origin + '/projects/parent?tab=products&returnTo=%2Fprojects%3Fview%3Dkanban');
       await returned(page, coverBefore, 'project-products/' + viewport.width + '/link-from-cover');
       if (!smoke) {
         const screenshot = path.join(directory, 'project-products-' + viewport.width + '.png');

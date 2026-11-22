@@ -27,9 +27,9 @@ export function SiteHeader({
           orientation="vertical"
           className="mx-2 hidden h-4 data-vertical:self-auto md:block"
         />
-        <h1 className="min-w-0 truncate text-sm font-medium md:text-base">
+        <span className="min-w-0 truncate text-sm font-medium md:text-base">
           {sectionTitle(pathname)}
-        </h1>
+        </span>
         <div className="ml-auto flex min-w-0 items-center gap-0 md:gap-1">
           {canAccessOperationalPath(user.roles,"/api/search")?<Omnisearch />:null}
           {extras}

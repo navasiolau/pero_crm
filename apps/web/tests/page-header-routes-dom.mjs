@@ -11,6 +11,8 @@ export async function assertPageHeader(page, expectedHref) {
   const visible = await header.first().waitFor({ state: "visible", timeout: 10000 }).then(() => true, () => false);
   check(visible, "HEADER_MISSING");
   check(await header.count() === 1, "HEADER_COUNT");
+  check(await page.getByRole("main").count() === 1, "MAIN_LANDMARK_COUNT");
+  check(await page.getByRole("main").getByRole("heading", { level: 1 }).count() === 1, "PRIMARY_HEADING_COUNT");
   check(await back.count() === (expectedHref === null ? 0 : 1), "ARROW_COUNT");
   if (expectedHref === null) return;
 
