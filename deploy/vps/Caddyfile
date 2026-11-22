@@ -9,8 +9,47 @@ crm.peromebel.by {
 }
 
 staging-crm.peromebel.by {
+	redir /telegram/finance https://telegram-staging.peromebel.by/telegram/finance 302
 	basic_auth {
 		staging $2a$14$loxh/pLiXQCMERQWX8BVc.F9H3fXOkXfgGZ/3MerSdyn/sGspnqhW
 	}
 	reverse_proxy 192.168.0.30:80
+}
+
+(staging-telegram-upstream) {
+	reverse_proxy 192.168.0.30:80 {
+		header_up X-Pero-Telegram-Finance-Only 1
+	}
+}
+
+telegram-staging.peromebel.by {
+	header X-Robots-Tag noindex
+
+	@entry {
+		method GET HEAD
+		path /telegram/finance /_next/static/*
+	}
+	handle @entry {
+		import staging-telegram-upstream
+	}
+
+	@session {
+		method POST
+		path /api/telegram/finance/session
+	}
+	handle @session {
+		import staging-telegram-upstream
+	}
+
+	@workspace {
+		path /finance /finance/* /logistics /logistics/* /notifications /api/finance/projects /api/finance/documents/* /api/logistics/documents/*
+		not path /api/logistics/documents/upload
+	}
+	handle @workspace {
+		import staging-telegram-upstream
+	}
+
+	handle {
+		respond 404
+	}
 }

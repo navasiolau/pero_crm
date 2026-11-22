@@ -4,6 +4,7 @@ const MAX_INIT_AGE_SECONDS = 120;
 export const TELEGRAM_FINANCE_TTL_SECONDS = 1800;
 export const TELEGRAM_FINANCE_COOKIE = "__Host-pero-telegram-finance";
 export const TELEGRAM_FINANCE_LAYOUT_HEADER = "x-pero-telegram-finance-layout";
+export const TELEGRAM_FINANCE_ONLY_HEADER = "x-pero-telegram-finance-only";
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && timingSafeEqual(a, b);
 

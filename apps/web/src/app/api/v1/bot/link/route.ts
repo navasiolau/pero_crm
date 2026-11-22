@@ -4,7 +4,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 
 import { authenticate, isErrorResponse } from "@/server/api/auth";
-import { botAllowed } from "@/server/telegram/bot-api";
+import { telegramBotUser } from "@/server/telegram/access";
 import { confirmTelegramLinkInTransaction } from "@/server/telegram/mutation-core";
 
 // POST /api/v1/bot/link — бот подтверждает привязку по одноразовому коду
@@ -30,12 +30,7 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     ok: true,
-    user: {
-      id: result.user.id,
-      name: result.user.name,
-      roles: result.user.roles,
-      botAllowed: botAllowed(result.user.roles),
-    },
+    user: telegramBotUser(result.user),
     linkedAt: result.linkedAt,
     binding: result.binding,
   });

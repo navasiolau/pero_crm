@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { botUser } from "./user-fixture.mjs";
 process.env.BOT_RECOVERY_TEST='1';process.env.TELEGRAM_API_ORIGIN='http://127.0.0.1:9080';
 process.env.TELEGRAM_BOT_TOKEN='fixture-token';process.env.CRM_BASE_URL='http://127.0.0.1:9081';process.env.CRM_API_TOKEN='fixture-crm-token';
 const sent=[],calls=[],receipts=new Map(),roles=new Map(),uploads=new Map();
@@ -19,7 +20,7 @@ globalThis.fetch=async(input,options={})=>{
   value={ok:true,document:uploads.get(body.clientMutationId)};
   if(loseUpload){loseUpload=false;throw Error('lost upload ACK');}
  }
- else if(url.pathname==='/api/v1/bot/session'){const id=url.searchParams.get('chatId');value={found:true,user:{id:'actor-'+id,name:'Actor',roles:roles.get(id)??['PROCUREMENT'],botAllowed:true}};}
+ else if(url.pathname==='/api/v1/bot/session'){const id=url.searchParams.get('chatId');value={found:true,user:botUser('actor-'+id,'Actor',roles.get(id)??['PROCUREMENT'])};}
  else if(url.pathname==='/api/v1/bot/directory'){
   const type=url.searchParams.get('type');
   value={ok:true,items:type==='materials'?[{id:'material',label:'Петля',unit:'шт'}]:type==='cash'?[{id:'usd-cash',label:'USD касса',currency:'USD'}]:[{id:'article',label:'Материалы'}]};

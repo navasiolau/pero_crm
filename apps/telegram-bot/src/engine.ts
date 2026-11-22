@@ -2,19 +2,16 @@ import { config } from "./config";
 import { pendingFinanceCommand, submitFinanceCommand } from "./finance-checkpoint";
 import { dialogChoices, dialogChoice } from "./dialog-choices";
 import {randomUUID} from "node:crypto";
-import { crm, CrmError, type ProjectRef,type ProjectBaseline } from "./crm";
+import { crm, CrmError, type BotAccess, type ProjectRef, type ProjectBaseline } from "./crm";
 import { tg, TgError, type InlineButton, type TgCallbackQuery, type TgMessage, type TgUpdate } from "./tg";
 import { documentAttempt, uploadFinanceDocument, documentUploadError, hasUnresolvedDocumentAttempt, paymentReportDocumentInput, type DocumentAttempt, type ReportDocument } from "./finance-document-upload";
 import { startStockMovement, stockMovementText, stockMovementCallback, type StockMovementDialog } from "./stock-movement-dialog";
 import { startStockPurchase, stockPurchaseText, stockPurchaseCallback, stockPurchaseDocument, type StockPurchaseDialog } from "./stock-purchase-dialog";
 import {
   CURRENCIES,
-  FINANCE_ROLES,
-  WAREHOUSE_ROLES,
   STAGE_LABELS,
   STAGE_ORDER,
   formatMoney,
-  hasAny,
   parseAmount,
   projectCardText,
   rolesLabel,
@@ -22,14 +19,12 @@ import {
 
 // Движок бота: роутер команд/кнопок + конечные автоматы диалогов.
 // Состояние диалогов — в памяти процесса (контейнер один, рестарт просто
-// сбрасывает начатые диалоги). Непривязанные чаты игнорируются; пользователям
-// без MANAGER_ROLES бот отвечает отказом (решение владельца).
+// сбрасывает начатые диалоги). Доступ к разделам проверяет CRM.
 
 interface Session {
   userId: string;
-  name: string;
-  roles: string[];
   botAllowed: boolean;
+  access: BotAccess;
   binding?: string;
 }
 
@@ -93,8 +88,12 @@ const financeProjectMenus = new Map<number, { token: string; projects: ProjectRe
 const dialogs = new Map<string, Dialog>();
 const observedActor = new Map<string, { userId: string; binding?: string }>();
 const callbackMessages = new Map<string, Map<number, Set<string>>>();
-const noticeAt = new Map<string, number>();
 const FINANCE_CALLBACK_ACTIONS = new Set(["payin", "payout", "payproj", "paygeneral", "paylist", "payoptions", "cur", "cash", "art", "nocomment", "payok", "docretry", "doccontinue", "docexclude", "sp"]);
+const PROJECT_CALLBACK_ACTIONS = new Set(["proj", "stage", "st", "edit", "ed", "mgr", "cli", "npc"]);
+const DIALOG_ACCESS = {
+  newProject: "projects", stage: "projects", edit: "projects",
+  payment: "finance", stockPurchase: "finance", stockMovement: "warehouse",
+} as const satisfies Record<Dialog["kind"], "projects" | "finance" | "warehouse">;
 
 function getDialog(chatId: number): Dialog | undefined {
   return dialogs.get(String(chatId));
@@ -106,7 +105,7 @@ function setDialog(chatId: number, dialog: Dialog | null): void {
 
 async function getSession(chatId: string): Promise<Session | null> {
   const response = await crm.session(chatId);
-  if (!response.found || !response.user) {
+  if (!response.found || !response.user?.access) {
     dropSession(chatId);
     return null;
   }
@@ -114,9 +113,8 @@ async function getSession(chatId: string): Promise<Session | null> {
   if (previous?.userId !== response.user.id || previous?.binding !== response.binding) dropSession(chatId);
   const session: Session = {
     userId: response.user.id,
-    name: response.user.name,
-    roles: response.user.roles,
     botAllowed: response.user.botAllowed,
+    access: response.user.access,
     binding: response.binding,
   };
   observedActor.set(chatId, { userId: session.userId, binding: session.binding });
@@ -196,44 +194,37 @@ export async function handleUpdate(update: TgUpdate): Promise<void> {
   }
 
   const session = await getSession(String(chatId));
-  if (!session) {
-    const url = config.financeWorkspaceUrl;
-    if (url && ["/start", "/финансы", "/finance"].includes(cmd)) {
-      await reply(chatId, "Подключите свою учётную запись CRM, чтобы открыть финансы.", [[{ text: "Подключить финансы", web_app: { url } }]]);
-    }
-    return;
-  }
-
+  if (!session) return;
   if (!session.botAllowed) {
-    const last = noticeAt.get(String(chatId)) ?? 0;
-    if (Date.now() - last > 60_000) {
-      noticeAt.set(String(chatId), Date.now());
-      await reply(
-        chatId,
-        `${session.name}, бот доступен только менеджерам, администраторам, директорам, бухгалтерам и снабженцам.`,
-      );
+    await reply(chatId, session.access.deniedMessage);
+    return;
+  }
+
+  try {
+    if (message.document || message.photo?.length) {
+      await paymentDocumentMessage(chatId, session, message);
+      return;
     }
-    return;
+    if (!message.text) return;
+    if (cmd) {
+      await handleCommand(chatId, session, cmd, args);
+      return;
+    }
+    const dialog = getDialog(chatId);
+    if (dialog) {
+      try {
+        await handleDialogText(chatId, session, dialog, text);
+      } catch (error) {
+        if (!(error instanceof CrmError)) throw error;
+        await reply(chatId, `❌ ${error.message}. Повторите ввод: исходные данные сохранены.`);
+      }
+      return;
+    }
+    await reply(chatId, "Команды бота — /help");
+  } catch (error) {
+    console.error("[engine] сообщение:", error);
+    await reply(chatId, "❌ Ошибка, попробуйте ещё раз");
   }
-
-  if (message.document || message.photo?.length) {
-    await paymentDocumentMessage(chatId, message);
-    return;
-  }
-  if (!message.text) return;
-
-  if (cmd !== "") {
-    await handleCommand(chatId, session, cmd, args);
-    return;
-  }
-
-  const dialog = getDialog(chatId);
-  if (dialog) {
-    try { await handleDialogText(chatId, session, dialog, text); }
-    catch(error){if(error instanceof CrmError)await reply(chatId,`❌ ${error.message}. Повторите ввод: исходные данные сохранены.`);else throw error;}
-    return;
-  }
-  await reply(chatId, "Команды бота — /help");
 }
 
 function parseCommand(text: string): { cmd: string; args: string[] } {
@@ -253,20 +244,14 @@ async function handleLinkCode(
   username?: string,
 ): Promise<void> {
   const result = await crm.link(code, String(chatId), username);
-  if (!result.ok || !result.user) {
-    await reply(chatId, result.error ?? "Не удалось привязать аккаунт");
-    return;
-  }
+  if (!result.ok || !result.user?.access) return;
   dropSession(String(chatId));
-  const who = `${result.user.name} · ${rolesLabel(result.user.roles)}`;
   if (!result.user.botAllowed) {
-    await reply(
-      chatId,
-      `Аккаунт привязан: ${who}.\nБот доступен только менеджерам, администраторам, директорам, бухгалтерам и снабженцам — команды неактивны.`,
-    );
+    await reply(chatId, result.user.access.deniedMessage);
     return;
   }
-  await reply(chatId, `✅ Привязано: ${who}\n\nСписок команд — /help`, financeWorkspaceButtons(result.user.roles));
+  const who = `${result.user.name} · ${rolesLabel(result.user.roles)}`;
+  await reply(chatId, `✅ Привязано: ${who}\n\nСписок команд — /help`, financeWorkspaceButtons(result.user.access));
 }
 
 // ─── Команды ─────────────────────────────────────────────────────────────────
@@ -280,7 +265,7 @@ async function handleCommand(
   switch (cmd) {
     case "/повтор":
     case "/retry": {
-      if (!hasAny(session.roles, FINANCE_ROLES)) return;
+      if (!session.access.finance) return reply(chatId, session.access.deniedMessage);
       const pending = pendingFinanceCommand(chatId, session.userId);
       if (!pending) {
         await reply(chatId, "Нет ожидающей подтверждения операции для вашего аккаунта.");
@@ -296,32 +281,31 @@ async function handleCommand(
       return;
     }
     case "/выдача": case "/stockout": case "/возврат": case "/stockreturn": case "/инвприход": case "/stockinventory": {
-      const current=await getSession(String(chatId));
-      if(chatId<=0||!current?.botAllowed||!hasAny(current.roles,WAREHOUSE_ROLES)){await reply(chatId,"Складские операции доступны складским ролям в личном чате.");return;}
+      if (!session.access.warehouse) return reply(chatId, session.access.deniedMessage);
       const kind=["/выдача","/stockout"].includes(cmd)?"EXPENSE":["/возврат","/stockreturn"].includes(cmd)?"RETURN":"INCOME";
       await startStockMovement({reply,getDialog,setDialog},chatId,kind);return;
     }
     case "/закупка":
     case "/stockin": {
-      const current = await getSession(String(chatId));
-      if (chatId <= 0 || !current?.botAllowed || !hasAny(current.roles,FINANCE_ROLES)) { await reply(chatId,"Закупки доступны финансовым ролям в личном чате с ботом."); return; }
-      if (await blockPendingFinance(chatId, current)) return;
+      if (!session.access.finance) return reply(chatId, session.access.deniedMessage);
+      if (await blockPendingFinance(chatId, session)) return;
       await startStockPurchase({ reply, getDialog, setDialog },chatId); return;
     }
     case "/финансы":
     case "/finance": {
-      const buttons = financeWorkspaceButtons(session.roles);
+      if (!session.access.finance) return reply(chatId, session.access.deniedMessage);
+      const buttons = financeWorkspaceButtons(session.access);
       await reply(chatId, buttons ? "Рабочее пространство CRM" : "Финансы в Telegram недоступны.", buttons);
       return;
     }
     case "/start":
     case "/help": {
-      await reply(chatId, helpText(session), financeWorkspaceButtons(session.roles));
+      await reply(chatId, helpText(session.access), financeWorkspaceButtons(session.access));
       return;
     }
     case "/новый":
     case "/new": {
-      if (!hasAny(session.roles, ["ADMIN", "DIRECTOR", "MANAGER"])) { await reply(chatId, "Недостаточно прав"); return; }
+      if (!session.access.projects) return reply(chatId, session.access.deniedMessage);
       setDialog(chatId, {
         kind: "newProject",
         step: "title",
@@ -336,13 +320,14 @@ async function handleCommand(
     }
     case "/проекты":
     case "/projects": {
+      if (!session.access.projects && !session.access.finance) return reply(chatId, session.access.deniedMessage);
       const result = await crm.projects(session.userId, args.join(" ") || undefined);
       const projects = result.projects ?? [];
       if (projects.length === 0) {
         await reply(chatId, "Проектов не найдено.");
         return;
       }
-      if (!hasAny(session.roles, ["ADMIN", "DIRECTOR", "MANAGER"])) {
+      if (!session.access.projects) {
         const token = randomUUID();
         financeProjectMenus.set(chatId, { token, projects: projects.slice(0, 10) });
         await reply(chatId, "Последние проекты. Чтобы найти другой, используйте /приход или /расход.", projects.slice(0, 10).map((project, index) => [
@@ -364,7 +349,7 @@ async function handleCommand(
     }
     case "/проект":
     case "/project": {
-      if (!hasAny(session.roles, ["ADMIN", "DIRECTOR", "MANAGER"])) { await reply(chatId, "Карточка проекта недоступна. Для платежа: /приход или /расход"); return; }
+      if (!session.access.projects) return reply(chatId, session.access.deniedMessage);
       if (!args[0]) {
         await reply(chatId, "Укажите номер: /проект 205");
         return;
@@ -392,19 +377,19 @@ async function handleCommand(
   }
 }
 
-function financeWorkspaceButtons(roles: string[]): InlineButton[][] | undefined {
+function financeWorkspaceButtons(access: BotAccess): InlineButton[][] | undefined {
   const url = config.financeWorkspaceUrl;
-  return url && hasAny(roles, FINANCE_ROLES) ? [[{ text: "Финансы", web_app: { url } }]] : undefined;
+  return url && access.finance ? [[{ text: "Финансы", web_app: { url } }]] : undefined;
 }
 
-function helpText(session: Session): string {
+function helpText(access: BotAccess): string {
   const lines = ["Команды бота:"];
-  if (hasAny(session.roles, ["ADMIN", "DIRECTOR", "MANAGER"])) lines.push(
+  if (access.projects) lines.push(
     "/новый — создать проект",
     "/проект <номер> — карточка проекта (этап, реквизиты, платежи)",
     "/проекты — последние проекты",
   );
-  if (hasAny(session.roles, FINANCE_ROLES)) {
+  if (access.finance) {
     if (config.financeWorkspaceUrl) lines.push("/финансы — открыть рабочее пространство");
     lines.push(
       "/приход [номер] [сумма] — приход по проекту или организации",
@@ -413,8 +398,8 @@ function helpText(session: Session): string {
       "/повтор — проверить незавершённое подтверждение",
     );
   }
-  if (hasAny(session.roles, FINANCE_ROLES) && !hasAny(session.roles, ["ADMIN", "DIRECTOR", "MANAGER"])) lines.push("/проекты [поиск] — найти проект для платежа");
-  if(hasAny(session.roles,WAREHOUSE_ROLES))lines.push("/выдача — выдать материал на изделие","/возврат — вернуть материал по исходной выдаче","/инвприход — инвентарный приход без кассы");
+  if (access.finance && !access.projects) lines.push("/проекты [поиск] — найти проект для платежа");
+  if (access.warehouse) lines.push("/выдача — выдать материал на изделие", "/возврат — вернуть материал по исходной выдаче", "/инвприход — инвентарный приход без кассы");
   lines.push("Отвязать бота — в CRM: меню профиля → Telegram");
   return lines.join("\n");
 }
@@ -447,7 +432,7 @@ async function showProjectCard(
       { text: "✏️ Реквизиты", callback_data: `edit:${projectId}` },
     ],
   ];
-  if (hasAny(session.roles, FINANCE_ROLES)) {
+  if (session.access.finance) {
     buttons.push([
       { text: "➕ Приход", callback_data: `payin:${projectId}` },
       { text: "➖ Расход", callback_data: `payout:${projectId}` },
@@ -465,15 +450,12 @@ async function handleDialogText(
   dialog: Dialog,
   text: string,
 ): Promise<void> {
-  if(dialog.kind==="stockMovement"){
-    const current=await getSession(String(chatId));
-    if(chatId<=0||!current?.botAllowed||!hasAny(current.roles,WAREHOUSE_ROLES)){await reply(chatId,"Недостаточно прав для склада");return;}
-    await stockMovementText({reply,getDialog,setDialog},chatId,current.userId,dialog,text);return;
+  if (!session.access[DIALOG_ACCESS[dialog.kind]]) return reply(chatId, session.access.deniedMessage);
+  if (dialog.kind === "stockMovement") {
+    await stockMovementText({reply,getDialog,setDialog},chatId,session.userId,dialog,text);return;
   }
   if (dialog.kind === "stockPurchase") {
-    const current = await getSession(String(chatId));
-    if (chatId <= 0 || !current?.botAllowed || !hasAny(current.roles,FINANCE_ROLES)) { await reply(chatId,"Недостаточно прав для закупки"); return; }
-    await stockPurchaseText({ reply, getDialog, setDialog },chatId,current.userId,dialog,text); return;
+    await stockPurchaseText({ reply, getDialog, setDialog },chatId,session.userId,dialog,text); return;
   }
   if (dialog.kind === "newProject") {
     await newProjectText(chatId, session, dialog, text);
@@ -549,14 +531,7 @@ async function startPayment(
   direction: "INCOME" | "EXPENSE",
   args: string[],
 ): Promise<void> {
-  if (chatId <= 0) { await reply(chatId, "Финансовые операции доступны в личном чате с ботом."); return; }
-  if (!hasAny(session.roles, FINANCE_ROLES)) {
-    await reply(
-      chatId,
-      "Платежи доступны администратору, директору, бухгалтеру и снабженцу.",
-    );
-    return;
-  }
+  if (!session.access.finance) return reply(chatId, session.access.deniedMessage);
   if (await blockPendingFinance(chatId, session)) return;
   const dialog: Extract<Dialog, { kind: "payment" }> = {
     kind: "payment",
@@ -676,11 +651,9 @@ async function paymentText(
   if (dialog.step === "document") await reply(chatId, "Отправьте отчётный документ файлом или фотографией.", [[CANCEL_BUTTON]]);
 }
 
-async function paymentDocumentMessage(chatId: number, message: TgMessage) {
-  if (!message.from || message.from.id !== chatId || chatId <= 0) return;
-  const session = await getSession(String(chatId));
+async function paymentDocumentMessage(chatId: number, session: Session, message: TgMessage) {
+  if (!session.access.finance) return reply(chatId, session.access.deniedMessage);
   const dialog = getDialog(chatId);
-  if (!session || !hasAny(session.roles, FINANCE_ROLES)) { await reply(chatId, "Недостаточно прав для финансовых документов"); return; }
   if (dialog?.kind === "stockPurchase") {
     await stockPurchaseDocument({ reply, getDialog, setDialog }, chatId, session.userId, dialog, message); return;
   }
@@ -890,25 +863,25 @@ async function saveProjectEdit(session:Session,dialog:Extract<Dialog,{kind:"edit
 async function handleCallback(query: TgCallbackQuery): Promise<void> {
   const chatId = query.message.chat.id;
   if (chatId <= 0 || query.from.id !== chatId) return;
+  const session = await getSession(String(chatId));
+  if (!session) return;
+  const data = query.data ?? "";
+  const [action, ...rest] = data.split(":");
+  if (!session.botAllowed ||
+      (action === "sw" && !session.access.warehouse) ||
+      (FINANCE_CALLBACK_ACTIONS.has(action) && !session.access.finance) ||
+      (PROJECT_CALLBACK_ACTIONS.has(action) && !session.access.projects)) {
+    return reply(chatId, session.access.deniedMessage);
+  }
   try {
     await tg.answerCallbackQuery(query.id);
   } catch {
     // не критично
   }
-  const data = query.data ?? "";
-  const [action, ...rest] = data.split(":");
-
-  const financial = FINANCE_CALLBACK_ACTIONS.has(action), warehouse = action === "sw";
-  const session = await getSession(String(chatId));
-  if (!session) return;
-  if (!session.botAllowed) return;
   if (session.binding && !callbackMessages.get(String(chatId))?.get(query.message.message_id)?.has(data)) {
     await reply(chatId, "Кнопка устарела. Откройте меню командой /help.");
     return;
   }
-  if(warehouse&&!hasAny(session.roles,WAREHOUSE_ROLES)){await reply(chatId,"Недостаточно прав для склада");return;}
-  if (financial && !hasAny(session.roles, FINANCE_ROLES)) { await reply(chatId, "Недостаточно прав для финансовой операции"); return; }
-
   try {
     await dispatchCallback(chatId, session, action, rest);
   } catch (e) {
@@ -934,9 +907,6 @@ async function dispatchCallback(
   if (action === "sp") {
     const dialog = getDialog(chatId);
     await stockPurchaseCallback({ reply, getDialog, setDialog },chatId,session.userId,dialog?.kind === "stockPurchase" ? dialog : undefined,rest); return;
-  }
-  if (["proj", "stage", "st", "edit"].includes(action) && !hasAny(session.roles, ["ADMIN", "DIRECTOR", "MANAGER"])) {
-    await reply(chatId, "Недостаточно прав"); return;
   }
   if (action === "cancel") {
     setDialog(chatId, null);
@@ -1309,11 +1279,10 @@ async function dispatchCallback(
     dialog.documentAttempt = undefined; await paymentDocumentList(chatId, dialog); return;
   }
   if (action === "docretry") {
-    const dialog = getDialog(chatId), current = await getSession(String(chatId));
-    if (!current || !hasAny(current.roles, FINANCE_ROLES) ||
-        dialog?.kind !== "payment" || dialog.step !== "document" || rest[0] !== dialog.documentAttempt?.clientMutationId) {
+    const dialog = getDialog(chatId);
+    if (dialog?.kind !== "payment" || dialog.step !== "document" || rest[0] !== dialog.documentAttempt?.clientMutationId) {
       await reply(chatId, "Загрузка недоступна — начните оформление расхода заново"); return;
     }
-    await uploadPaymentDocument(chatId, current, dialog);
+    await uploadPaymentDocument(chatId, session, dialog);
   }
 }

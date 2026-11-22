@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Prisma, TelegramLink } from "@prisma/client";
-import { ADMIN_ROLES, FINANCE_ROLES, hasAnyRole } from "@/lib/roles";
+import { ADMIN_ROLES, hasAnyRole } from "@/lib/roles";
+import { telegramBindingVersion } from "./access";
 import { requireActorRoles, type DomainActor } from "@/server/actor";
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 
@@ -61,30 +62,7 @@ export async function confirmTelegramLinkInTransaction(tx: Prisma.TransactionCli
     linkedAt: new Date(Math.max(Date.now(), (link.revokedAt?.getTime() ?? 0) + 1)), linkCode: null, linkCodeExpiresAt: null,
   } });
   await recordLink(tx, { id: link.user.id, name: link.user.name, roles: link.user.roles, source: "telegram" }, link.userId, link.user.name, "link", link, updated);
-  return { ok: true as const, user: link.user, linkedAt: updated.linkedAt, binding: `${updated.id}:${updated.generation}:${link.user.sessionVersion}` };
-}
-
-export async function bindTelegramFinanceInTransaction(tx: Prisma.TransactionClient, expected: {
-  chatId: string; userId: string; sessionVersion: number; linkId: string | null; linkGeneration: number | null;
-  expiresAt: Date;
-}) {
-  await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtextextended(${`telegram-chat:${expected.chatId}`}, 0))`;
-  await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${expected.userId} FOR UPDATE`;
-  const user = await tx.user.findUnique({ where: { id: expected.userId }, select: userSelection });
-  const before = await tx.telegramLink.findUnique({ where: { userId: expected.userId } });
-  if (expected.expiresAt.getTime() <= Date.now() || !user?.active || user.sessionVersion !== expected.sessionVersion ||
-      !hasAnyRole(user.roles, FINANCE_ROLES) || before?.chatId ||
-      (before?.revokedAt && before.revokedAt.getTime() > expected.expiresAt.getTime() - 120_000) || (before?.id ?? null) !== expected.linkId ||
-      (before?.generation ?? null) !== expected.linkGeneration ||
-      await tx.telegramLink.findUnique({ where: { chatId: expected.chatId }, select: { id: true } })) return null;
-
-  const data = { chatId: expected.chatId, username: null, revokedAt: null, linkCode: null, linkCodeExpiresAt: null,
-    linkedAt: new Date(Math.max(Date.now(), (before?.revokedAt?.getTime() ?? 0) + 1)) };
-  const after = before ? await tx.telegramLink.update({ where: { id: before.id }, data: { ...data, generation: { increment: 1 } } })
-    : await tx.telegramLink.create({ data: { ...data, userId: user.id, generation: 1 } });
-  await recordLink(tx, { id: user.id, name: user.name, roles: user.roles, source: "telegram" }, user.id, user.name, "link", before, after);
-  return { linkId: after.id, generation: after.generation, linkedAt: data.linkedAt.toISOString(),
-    chatId: expected.chatId, userId: user.id, version: user.sessionVersion };
+  return { ok: true as const, user: link.user, linkedAt: updated.linkedAt, binding: telegramBindingVersion(updated.id, updated.generation, link.user.sessionVersion) };
 }
 
 export async function unlinkTelegramInTransaction(tx: Prisma.TransactionClient, actor: DomainActor, userId: string, options?: { reversal: true }) {
@@ -103,7 +81,7 @@ export async function unlinkTelegramInTransaction(tx: Prisma.TransactionClient, 
 
 export async function unlinkTelegramChatInTransaction(tx: Prisma.TransactionClient, chatId: string, expectedBinding?: string) {
   const before = await tx.telegramLink.findUnique({ where: { chatId }, include: { user: { select: userSelection } } });
-  if (!before || (expectedBinding !== undefined && expectedBinding !== `${before.id}:${before.generation}:${before.user.sessionVersion}`)) return { ok: true as const, deleted: 0 };
+  if (!before || (expectedBinding !== undefined && expectedBinding !== telegramBindingVersion(before.id, before.generation, before.user.sessionVersion))) return { ok: true as const, deleted: 0 };
   // Повторная проверка привязки после lock не позволяет удалить уже перепривязанный чат.
   await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${before.userId} FOR UPDATE`;
   const current = await tx.telegramLink.findUnique({ where: { userId: before.userId }, include: { user: { select: userSelection } } });

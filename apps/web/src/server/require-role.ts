@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
+import { TELEGRAM_SECTION_DENIED } from "@/server/telegram/access";
 import { scopedFinanceAuth } from "@/server/telegram/finance-session";
 import type { Role } from "@prisma/client";
 
@@ -29,7 +30,9 @@ export async function requireAdmin() {
 export async function requireFinanceRole(allowed: Role[]) {
   const session = await scopedFinanceAuth();
   if (!session?.user) redirect("/login");
-  if (!hasAnyRole(session.user.roles, allowed)) throw new Error("Недостаточно прав");
+  if (!hasAnyRole(session.user.roles, allowed)) {
+    throw new Error("telegramFinance" in session ? TELEGRAM_SECTION_DENIED : "Недостаточно прав");
+  }
   return session;
 }
 

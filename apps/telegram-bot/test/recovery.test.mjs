@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { botUser, deniedMessage } from "./user-fixture.mjs";
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 
@@ -54,7 +55,9 @@ test("long polling drives link, role gate, project and payment through fake HTTP
     update(4, 101, "Восстановленный заказ"),
     update(5, 101, "Тестовый клиент"),
     callback(6, 101, "cli:client-1"),
+    update(7, 404, "/help"),
     callback(8, 101, "mgr:manager-1"),
+    update(9, 405, "/help"),
     update(10, 101, "/приход 205 100"),
     callback(11, 101, "cur:BYN"),
     callback(12, 101, "cash:cash-1"),
@@ -90,12 +93,18 @@ test("long polling drives link, role gate, project and payment through fake HTTP
     } else if (url.pathname.endsWith("/answerCallbackQuery")) payload = { ok: true, result: true };
     else if (url.pathname === "/api/v1") payload = { service: "PERO CRM", api: "v1", plugins: [] };
     else if (url.pathname === "/api/v1/bot/register") payload = { ok: true };
-    else if (url.pathname === "/api/v1/bot/link") payload = { ok: true, user: { name: "Linked User", roles: ["WORKER"], botAllowed: false } };
+    else if (url.pathname === "/api/v1/bot/link") payload = { ok: true, user: botUser("linked-1", "Linked User", ["ADMIN"]) };
     else if (url.pathname === "/api/v1/bot/session") {
       const chatId = url.searchParams.get("chatId");
+      if (chatId === "405") {
+        response.writeHead(503);
+        response.end("Unavailable");
+        return;
+      }
       payload = chatId === "202"
-        ? { ok: true, found: true, user: { id: "worker-1", name: "Worker", roles: ["WORKER"], botAllowed: false } }
-        : { ok: true, found: true, user: { id: "manager-1", name: "Manager", roles: ["ADMIN"], botAllowed: true } };
+        ? { ok: true, found: true, user: botUser("worker-1", "Worker", ["WORKER"]) }
+        : chatId === "404" ? { ok: true, found: false }
+          : { ok: true, found: true, user: botUser("manager-1", "Manager", ["ADMIN"]) };
     } else if (url.pathname === "/api/v1/bot/projects" && request.method === "GET") {
       payload = { ok: true, projects: [{ id: "project-205", number: "205", title: "Project", stage: "NEW", currency: "BYN" }] };
     } else if (url.pathname === "/api/v1/bot/projects" && request.method === "POST") payload = { ok: true, number: "999" };
@@ -157,7 +166,8 @@ test("long polling drives link, role gate, project and payment through fake HTTP
     }
   });
 
-  assert.doesNotMatch(stderr, /\[bot\] (?:фатальная ошибка|ошибка polling|ошибка обработки)/);
+  assert.doesNotMatch(stderr, /\[bot\] (?:фатальная ошибка|ошибка polling)/);
+  assert.match(stderr, /ошибка обработки обновления:.*CRM вернула HTTP 503/);
   assert.equal(evidence.polling.failureReason, null);
   assert.ok(Date.parse(evidence.polling.lastSuccessAt));
   assert.ok(Date.parse(evidence.crm.lastSuccessAt));
@@ -165,7 +175,8 @@ test("long polling drives link, role gate, project and payment through fake HTTP
   assert.ok(calls.some((call) => call.path === "/api/v1/bot/link" && call.body.code === "LINKCODE"));
   assert.ok(sent.some((message) => message.chat_id === 303 && message.text.toLowerCase().includes("привяз")));
   assert.ok(!sent.some((message) => message.text.includes("Первоначальная цена")));
-  assert.ok(sent.some((message) => message.chat_id === 202 && message.text.includes("доступен только")));
+  assert.deepEqual(sent.filter(message => message.chat_id === 202).map(message => message.text), [deniedMessage]);
+  assert.ok(!sent.some(message => [404, 405].includes(message.chat_id)));
 
   const project = calls.find((call) => call.path === "/api/v1/bot/projects" && call.method === "POST");
   assert.deepEqual(project.body, { title: "Восстановленный заказ", clientId: "client-1", managerId: "manager-1" });

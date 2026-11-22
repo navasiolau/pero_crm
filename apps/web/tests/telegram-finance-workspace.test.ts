@@ -4,7 +4,7 @@ import { createRequire, Module } from "node:module";
 import test from "node:test";
 import { NextRequest } from "next/server";
 import {
-  isTelegramFinancePath, readFinanceGrant, signFinanceGrant, TELEGRAM_FINANCE_COOKIE, verifiedTelegramIdentity,
+  isTelegramFinancePath, readFinanceGrant, signFinanceGrant, TELEGRAM_FINANCE_COOKIE, TELEGRAM_FINANCE_ONLY_HEADER, verifiedTelegramIdentity,
 } from "../src/server/telegram/finance-security";
 
 const token = "fake-stage-token";
@@ -58,23 +58,32 @@ process.env.PERO_TELEGRAM_FINANCE_BOT_TOKEN = token;
 process.env.PERO_TELEGRAM_FINANCE_SESSION_SECRET = secret;
 
 const dbUser = { id: "accountant-1", active: true, name: "Бухгалтер", email: "accountant@example.invalid", roles: ["ACCOUNTANT"], sessionVersion: 1, updatedAt: new Date((now - 1000) * 1000) };
-const dbLink = { id: "link-1", linkedAt: new Date((now - 1000) * 1000), revokedAt: null, generation: 1, user: dbUser };
+const dbLink = { id: "link-1", chatId: String(user.id), linkedAt: new Date((now - 1000) * 1000), revokedAt: null, generation: 1, user: dbUser };
 let linked = true;
 let activeLink = dbLink;
 let lookups = 0;
+let webAuthCalls = 0;
 inject("../src/lib/prisma", { prisma: { telegramLink: { findUnique: async ({ where }: { where: { chatId: string } }) => {
   lookups++;
   assert.equal(where.chatId, String(user.id));
   return linked ? activeLink : null;
-} }, telegramFinanceBinding: { createMany: async () => ({ count: 1 }) } } });
-inject("../src/auth", { auth: async (request?: NextRequest) => request ? Response.redirect(origin + "/login") : null });
+} } } });
+inject("next/headers", { cookies: async () => ({ get: () => undefined }) });
+inject("../src/auth", { auth: async (request?: NextRequest) => {
+  webAuthCalls++;
+  return request ? Response.redirect(origin + "/login") : null;
+} });
 const { POST } = require("../src/app/api/telegram/finance/session/route") as typeof import("../src/app/api/telegram/finance/session/route");
-const { resolveTelegramFinanceSession } = require("../src/server/telegram/finance-session") as typeof import("../src/server/telegram/finance-session");
+const { resolveTelegramFinanceSession, scopedFinanceAuth } = require("../src/server/telegram/finance-session") as typeof import("../src/server/telegram/finance-session");
 const { default: middleware } = require("../src/middleware") as typeof import("../src/middleware");
 const request = (body: string, requestOrigin = origin) =>
   new NextRequest(origin + "/api/telegram/finance/session", { method: "POST", body, headers: { origin: requestOrigin } });
-const middlewareRequest = (path: string, cookie: string, method = "GET") =>
-  new NextRequest(origin + path, { method, headers: { cookie: `${TELEGRAM_FINANCE_COOKIE}=${cookie}` } });
+const middlewareRequest = (path: string, cookie: string, method = "GET", telegramOnly = false) =>
+  new NextRequest(origin + path, { method, headers: {
+    ...(cookie ? { cookie: `${TELEGRAM_FINANCE_COOKIE}=${cookie}` } : {}),
+    ...(telegramOnly ? { [TELEGRAM_FINANCE_ONLY_HEADER]: "1" } : {}),
+  } });
+const deniedMessage = "Вам не доступен этот раздел, если это ошибка - обратитесь к Администратору";
 
 test("entry verifies before lookup, sets only scoped cookie, and revocation is immediate", async () => {
   assert.equal((await POST(request(signed(), "https://foreign.test"))).status, 403);
@@ -85,16 +94,21 @@ test("entry verifies before lookup, sets only scoped cookie, and revocation is i
   assert.match(result.headers.get("set-cookie") ?? "", /Secure.*HttpOnly.*SameSite=lax/i);
   assert.deepEqual(await result.json(), { ok: true });
   const cookie = result.cookies.get(TELEGRAM_FINANCE_COOKIE)?.value ?? "";
-  assert.equal((await resolveTelegramFinanceSession(cookie))?.user.id, "accountant-1");
+  const checkedSession = await resolveTelegramFinanceSession(cookie);
+  assert.equal(checkedSession?.kind === "authenticated" && checkedSession.session.user.id, "accountant-1");
   const event = null as unknown as Parameters<typeof middleware>[1];
   const pass = await middleware(middlewareRequest("/finance", cookie), event);
   assert.equal(pass?.headers.get("x-middleware-next"), "1");
   const wrongArea = await middleware(middlewareRequest("/plan", cookie), event);
   assert.equal(wrongArea?.headers.get("location"), origin + "/login");
   activeLink = { ...dbLink, user: { ...dbUser, roles: ["MANAGER"] } };
-  assert.equal(await resolveTelegramFinanceSession(cookie), null);
+  const roleDenied = await POST(request(signed()));
+  assert.equal(roleDenied.status, 403);
+  assert.deepEqual(await roleDenied.json(), { ok: false, error: deniedMessage });
+  assert.deepEqual(await resolveTelegramFinanceSession(cookie), { kind: "forbidden" });
   const rejected = await middleware(middlewareRequest("/finance", cookie, "POST"), event);
-  assert.equal(rejected?.status, 401);
+  assert.equal(rejected?.status, 403);
+  assert.equal(await rejected?.text(), deniedMessage);
   activeLink = { ...dbLink, user: { ...dbUser, sessionVersion: 2 } };
   assert.equal(await resolveTelegramFinanceSession(cookie), null);
   activeLink = { ...dbLink, linkedAt: new Date("2026-11-21T13:31:00.000Z") };
@@ -107,6 +121,33 @@ test("entry verifies before lookup, sets only scoped cookie, and revocation is i
   assert.equal(await resolveTelegramFinanceSession(cookie), null);
   const unbound = await POST(request(signed()));
   assert.equal(unbound.status, 409);
-  assert.deepEqual(await unbound.json(), { ok: false, code: "LINK_REQUIRED" });
-  assert.equal(unbound.cookies.get(TELEGRAM_FINANCE_COOKIE), undefined);
+  assert.deepEqual(await unbound.json(), {
+    ok: false, code: "LINK_REQUIRED", error: "Привяжите Telegram в профиле CRM через «Telegram → Получить ссылку».",
+  });
+  assert.equal(unbound.headers.get("set-cookie"), null);
+});
+
+test("the staging Mini App origin requires Telegram authentication for pages, actions and files", async () => {
+  linked = true;
+  activeLink = { ...dbLink, user: { ...dbUser, roles: ["PROCUREMENT"] } };
+  const result = await POST(request(signed()));
+  const cookie = result.cookies.get(TELEGRAM_FINANCE_COOKIE)?.value ?? "";
+  assert.ok(cookie);
+  const event = null as unknown as Parameters<typeof middleware>[1];
+  const before = webAuthCalls;
+  const page = await middleware(middlewareRequest("/finance", "", "GET", true), event);
+  assert.equal(page?.headers.get("location"), origin + "/telegram/finance");
+  for (const [path, method] of [["/api/finance/documents/d1", "GET"], ["/finance/expenses", "POST"]]) {
+    const response = await middleware(middlewareRequest(path, "", method, true), event);
+    assert.equal(response?.status, 401);
+  }
+  for (const path of ["/finance/payroll", "/finance/payroll/export", "/finance/unknown"]) {
+    const response = await middleware(middlewareRequest(path, cookie, "GET", true), event);
+    assert.equal(response?.status, 403);
+    assert.equal(await response?.text(), deniedMessage);
+  }
+  assert.equal((await middleware(middlewareRequest("/finance/accounts", cookie, "GET", true), event))?.headers.get("x-middleware-next"), "1");
+  assert.equal(await scopedFinanceAuth(true), null);
+  assert.equal(webAuthCalls, before);
+  assert.equal((await middleware(middlewareRequest("/finance", ""), event))?.headers.get("location"), origin + "/login");
 });

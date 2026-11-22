@@ -1,13 +1,14 @@
 import { auth } from "@/auth";
 import { cookies } from "next/headers";
 import type { Session } from "next-auth";
-import { prisma } from "@/lib/prisma";
 import { FINANCE_ROLES, hasAnyRole } from "@/lib/roles";
+import { findActiveTelegramLink } from "./access";
 import {
   readFinanceGrant, signFinanceGrant, TELEGRAM_FINANCE_COOKIE, TELEGRAM_FINANCE_TTL_SECONDS,
 } from "./finance-security";
 
 export type TelegramFinanceSession = Session & { telegramFinance: true };
+type FinanceSessionResult = { kind: "authenticated"; session: TelegramFinanceSession } | { kind: "forbidden" };
 
 export function telegramFinanceConfig() {
   const origin = process.env.PERO_TELEGRAM_FINANCE_ORIGIN;
@@ -22,50 +23,50 @@ export function telegramFinanceConfig() {
   }
 }
 
-async function currentFinanceLink(chatId: string) {
-  const link = await prisma.telegramLink.findUnique({
-    where: { chatId },
-    select: { id: true, linkedAt: true, revokedAt: true, generation: true, user: {
-      select: { id: true, active: true, name: true, email: true, roles: true, sessionVersion: true, updatedAt: true },
-    } },
-  });
-  return link?.linkedAt && !link.revokedAt && link.user.active && hasAnyRole(link.user.roles, FINANCE_ROLES)
-    ? { id: link.id, linkedAt: link.linkedAt.toISOString(), generation: link.generation, user: link.user } : null;
-}
-
 export async function startTelegramFinanceSession(chatId: string, secret: string, authenticatedAt: number) {
-  const link = await currentFinanceLink(chatId);
-  if (!link || authenticatedAt < Math.max(Date.parse(link.linkedAt), link.user.updatedAt.getTime())) return null;
-  return signFinanceGrant({
-    chatId, linkId: link.id, linkedAt: link.linkedAt, generation: link.generation, userId: link.user.id,
+  const link = await findActiveTelegramLink({ chatId });
+  if (!link) return { kind: "unlinked" } as const;
+  if (!hasAnyRole(link.user.roles, FINANCE_ROLES)) return { kind: "forbidden" } as const;
+  if (authenticatedAt < Math.max(link.linkedAt.getTime(), link.user.updatedAt.getTime())) return { kind: "stale" } as const;
+  const proof = signFinanceGrant({
+    chatId, linkId: link.id, linkedAt: link.linkedAt.toISOString(), generation: link.generation, userId: link.user.id,
     version: link.user.sessionVersion, expires: Math.floor(Date.now() / 1000) + TELEGRAM_FINANCE_TTL_SECONDS,
   }, secret);
+  return { kind: "signed", proof } as const;
 }
 
-export async function resolveTelegramFinanceSession(raw?: string): Promise<TelegramFinanceSession | null> {
+export async function resolveTelegramFinanceSession(raw?: string): Promise<FinanceSessionResult | null> {
   const config = telegramFinanceConfig();
   if (!config || !raw) return null;
   const grant = readFinanceGrant(raw, config.secret);
   if (!grant) return null;
-  const link = await currentFinanceLink(grant.chatId);
-  if (!link || link.id !== grant.linkId || link.generation !== grant.generation || link.linkedAt !== grant.linkedAt || link.user.id !== grant.userId ||
-      link.user.sessionVersion !== grant.version) return null;
+  const link = await findActiveTelegramLink({ chatId: grant.chatId });
+  if (!link || link.id !== grant.linkId || link.generation !== grant.generation ||
+      link.linkedAt.toISOString() !== grant.linkedAt || link.user.id !== grant.userId) return null;
+  if (!hasAnyRole(link.user.roles, FINANCE_ROLES)) return { kind: "forbidden" };
+  if (link.user.sessionVersion !== grant.version) return null;
   const { id, name, email, roles, sessionVersion } = link.user;
   return {
-    telegramFinance: true,
-    expires: new Date(grant.expires * 1000).toISOString(),
-    user: { id, name, email, roles, sessionVersion },
+    kind: "authenticated",
+    session: {
+      telegramFinance: true,
+      expires: new Date(grant.expires * 1000).toISOString(),
+      user: { id, name, email, roles, sessionVersion },
+    },
   };
 }
 
 /** Только адаптеры явно перечисленных рабочих операций используют Telegram-сессию. */
-export async function scopedFinanceAuth() {
+export async function scopedFinanceAuth(telegramOnly = false) {
   if (telegramFinanceConfig()) {
     const jar = await cookies();
     const raw = jar.get(TELEGRAM_FINANCE_COOKIE)?.value;
-    if (raw) return resolveTelegramFinanceSession(raw);
+    if (raw) {
+      const result = await resolveTelegramFinanceSession(raw);
+      return result?.kind === "authenticated" ? result.session : null;
+    }
   }
-  return auth();
+  return telegramOnly ? null : auth();
 }
 
 export function financeSessionSource(session: Session): "telegram" | "web" {
