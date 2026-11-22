@@ -55,7 +55,7 @@ function FilterTriggerText({ label, narrowLabel, count, detail }: {
   label: string; narrowLabel?: string; count: number; detail?: string;
 }) {
   return <>
-    <span className="min-w-0 truncate">
+    <span data-expense-filter-label="" className="min-w-0 truncate">
       {narrowLabel ? <>
         <span className="min-[360px]:hidden">{narrowLabel}</span>
         <span className="hidden min-[360px]:inline">{label}</span>
@@ -242,7 +242,7 @@ export function OrganizationExpenseToolbar({ options }: Pick<OrganizationExpense
   const { q, setQ } = useListSearch();
 
   return (
-    <div role="group" aria-label="Фильтры расходов" className="flex min-w-0 items-center gap-[3px] max-[400px]:gap-px md:gap-1.5 @[52rem]/expenses:grid @[52rem]/expenses:grid-cols-[minmax(0,2.5fr)_minmax(0,1.5fr)_minmax(max-content,1.2fr)_repeat(3,minmax(max-content,1fr))] @[52rem]/expenses:gap-2">
+    <div data-slot="expense-filters" role="group" aria-label="Фильтры расходов" className="flex min-w-0 items-center gap-[3px] max-[400px]:gap-px md:gap-1.5 @[52rem]/expenses:grid @[52rem]/expenses:grid-cols-[minmax(0,2.5fr)_minmax(0,1.5fr)_minmax(max-content,1.2fr)_repeat(3,minmax(max-content,1fr))] @[52rem]/expenses:gap-2">
       <div className="@container/search relative min-w-0 flex-1">
         <Search className="pointer-events-none absolute top-1/2 left-2 hidden size-4 -translate-y-1/2 text-muted-foreground md:block" />
         <Input

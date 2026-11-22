@@ -1,23 +1,20 @@
 "use client";
 
 import * as React from "react";
-import { createContext, useContext, useState } from "react";
+import { useState } from "react";
 import { Download, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { FullscreenImageViewport } from "@/components/fullscreen-image-viewport";
 import { getViewableFileSource, type ViewableFile } from "@/lib/viewable-file";
 import { cn } from "@/lib/utils";
+import { useTelegramFinanceUi } from "@/components/telegram-finance-scope";
 
 export { getViewableFileSource, type ViewableFile } from "@/lib/viewable-file";
 export type FileViewerVariant = "standard" | "cover-fullscreen" | "fullscreen";
 export type FileNameTone = "default" | "red";
 
-const TelegramPdfPreview = createContext(false);
-
-export function TelegramFileViewerScope({ children }: { children: React.ReactNode }) {
-  return <TelegramPdfPreview.Provider value={true}>{children}</TelegramPdfPreview.Provider>;
-}
+export { TelegramFinanceUiScope as TelegramFileViewerScope } from "@/components/telegram-finance-scope";
 export function getFileViewerPresentation(variant: FileViewerVariant = "standard", file?: Pick<ViewableFile,"mimeType">) {
   const image=file ? file.mimeType.startsWith("image/") : variant === "cover-fullscreen";
   return image||variant==='fullscreen'
@@ -64,7 +61,7 @@ export function FileViewer({file,open,onOpenChange,variant="standard",filenameTo
 }
 export function useFileViewer(variant: FileViewerVariant="standard", filenameTone: FileNameTone="default") {
   const [file,setFile]=useState<ViewableFile|null>(null);
-  const telegram = useContext(TelegramPdfPreview);
+  const telegram = useTelegramFinanceUi();
   const previewsProtectedPdf = (file: ViewableFile) =>
     telegram && isPdf(file) && (file.source === "finance" || file.source === "logistics");
   function open(file: ViewableFile) {

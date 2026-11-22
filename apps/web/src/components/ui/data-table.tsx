@@ -22,6 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { useTelegramFinanceUi } from "@/components/telegram-finance-scope";
 
 interface DataColumnSort<TRow> {
   id: string;
@@ -90,6 +91,7 @@ export function DataTable<TRow extends { id: string }>({
   tableSummary?: ReactNode;
   tableHeaderClassName?: string;
 }) {
+  const telegram = useTelegramFinanceUi();
   const [query, setQuery] = useState("");
   const [sortId, setSortId] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -100,6 +102,24 @@ export function DataTable<TRow extends { id: string }>({
     ...(column.additionalSorts ?? []),
   ]), [columns]);
   const hasSummary = tableSummary !== undefined && tableSummary !== null;
+  const mobileCard = renderMobileCard ?? (telegram ? (row: TRow) => (
+    <dl className="grid gap-2">
+      {columns.map(column => {
+        const value = column.cell(row);
+        if (value == null) return null;
+        return (
+          <div key={column.id} className={cn("min-w-0", column.header
+            ? "grid grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)] items-baseline gap-2"
+            : "border-t pt-2")}>
+            <dt className={column.header ? "text-sm text-muted-foreground" : "sr-only"}>
+              {column.header || "Действия"}
+            </dt>
+            <dd className="min-w-0 wrap-anywhere text-sm font-medium">{value}</dd>
+          </div>
+        );
+      })}
+    </dl>
+  ) : undefined);
 
   const filtered = useMemo(() => {
     // Сервер-режим: данные уже отфильтрованы и отсортированы на сервере
@@ -202,7 +222,7 @@ export function DataTable<TRow extends { id: string }>({
     <div className="flex min-w-0 flex-col gap-3">
       {server ? null : (
         <div className="relative max-w-sm">
-          <Search className="absolute top-2.5 left-2 size-4 text-muted-foreground" />
+          <Search className="pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
             onChange={(event) => {
@@ -217,9 +237,9 @@ export function DataTable<TRow extends { id: string }>({
 
       <div className={hasSummary ? "min-w-0 overflow-hidden rounded-xl border" : "contents"}>
         {hasSummary && <div className="border-b px-3 py-2">{tableSummary}</div>}
-        {renderMobileCard ? (
+        {mobileCard ? (
           <div className={cn("flex min-w-0 flex-col gap-3 md:hidden", hasSummary && "p-2")}>
-            <label className="flex min-w-0 flex-col gap-1 text-sm">
+            {(!telegram || sortOptions.some(column => server || column.sortValue)) && <label className="flex min-w-0 flex-col gap-1 text-sm">
               Сортировка
               <select
                 aria-label="Сортировка"
@@ -238,7 +258,7 @@ export function DataTable<TRow extends { id: string }>({
                   <option key={`${column.id}:desc`} value={`${column.id}:desc`}>{column.header} ↓</option>,
                 ])}
               </select>
-            </label>
+            </label>}
             {pageRows.map((row) => <article key={row.id} data-slot="mobile-list-card"
               aria-label={rowAriaLabel?.(row)}
               tabIndex={onRowClick ? 0 : undefined}
@@ -253,12 +273,12 @@ export function DataTable<TRow extends { id: string }>({
                 if (onRowClick && event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
                   event.preventDefault(); onRowClick(row);
                 }
-              }}>{renderMobileCard(row)}</article>)}
+              }}>{mobileCard(row)}</article>)}
             {pageRows.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">{emptyText}</p>}
           </div>
         ) : null}
 
-        <div className={cn("min-w-0", !hasSummary && "rounded-xl border", renderMobileCard && "hidden md:block")}>
+        <div className={cn("min-w-0", !hasSummary && "rounded-xl border", mobileCard && "hidden md:block")}>
           <Table>
             <TableHeader className={tableHeaderClassName}>
               <TableRow>

@@ -27,6 +27,7 @@ const OptionRow = memo(function OptionRow({ option, selected, onSelect, wrapOpti
   option: SearchableOption; selected: boolean; onSelect: (value: string) => void; wrapOptions?: boolean;
 }) {
   return <button key={option.value} type="button" disabled={option.disabled}
+    data-slot="searchable-select-option"
     className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent", selected && "bg-accent/60", option.disabled && "cursor-not-allowed opacity-45 hover:bg-transparent")}
     onClick={() => { if (!option.disabled) onSelect(option.value); }}>
     <Check className={cn("size-4 shrink-0", selected ? "opacity-100" : "opacity-0")} />

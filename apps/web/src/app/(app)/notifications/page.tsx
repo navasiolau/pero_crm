@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-import { scopedFinanceAuth } from "@/server/telegram/finance-session";
+import { auth } from "@/auth";
 import {
   getMyPreferences,
   listMyNotifications,
@@ -16,7 +16,7 @@ export default async function NotificationsPage({
 }: {
   searchParams: Promise<{ page?: string }>;
 }) {
-  const session = await scopedFinanceAuth();
+  const session = await auth();
   if (!session?.user) redirect("/login");
 
   const { page: param } = await searchParams;

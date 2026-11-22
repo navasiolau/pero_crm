@@ -68,7 +68,7 @@ export function readFinanceGrant(raw: string, secret: string, now = Math.floor(D
 const pages = new Set([
   "/finance", "/finance/expenses", "/finance/income", "/finance/accounts", "/finance/accounts/report",
   "/finance/articles", "/finance/projects", "/finance/payroll", "/finance/payroll/export", "/finance/advances",
-  "/finance/documents", "/logistics", "/notifications", "/api/finance/projects",
+  "/finance/documents", "/logistics", "/api/finance/projects",
   "/api/finance/documents/upload",
 ]);
 
