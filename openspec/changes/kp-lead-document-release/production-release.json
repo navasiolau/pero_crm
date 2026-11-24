@@ -1,0 +1,164 @@
+{
+  "acceptedRevision": "9075ceeb1c2bcb5e1c078032179a2b471bbf863b",
+  "previousProduction": "842cd53a5002b7b720cfc1df6b9bc3c80cbb5a45",
+  "feature274Branch": "aec11d62712bcc3fdb54347e8fb1c8f34ba1b0a9",
+  "remoteMainEqualsStaging": true,
+  "treeProof": {
+    "filesChecked": 3318,
+    "exactTree": true,
+    "migrations": 0,
+    "oldContractAssets": {
+      "packages/kp-template/assets/templates/contracts/furniture.docx": "e442f86bbd558a0f8ddee9c06b4c31e624c33d68f161fc8ff7aed74eb387e448",
+      "packages/kp-template/assets/lib/contract-docx.js": "ff23382c87c0f79c78b728f8cc283aa5942518fdf371dd822a6b037c7f2cc469",
+      "packages/kp-template/assets/public/js/contract-editor.js": "aad5bb8a5d676b9f77abf7d11644cb2bfc8a0a3bbaa34c0fe9ada203892d2308",
+      "packages/kp-template/index.cjs": "f20e488898a9a31d01a619fcbce74341159f43bdd473c49e1dbba732f30d87c0"
+    },
+    "expectedTransport": "26e37aa5eb193435215024bf4ac12faa92a719ea7125f88cddf600d681bf5ba4"
+  },
+  "changedPaths": [
+    "apps/web/src/server/kp/proposal-core.ts",
+    "apps/web/src/server/kp/proposal-item-sync.ts",
+    "apps/web/tests/helpers/kp-lead-release-native.ts",
+    "apps/web/tests/integration/domain-postgres.test.ts",
+    "apps/web/tests/kp-proposal-core.test.ts",
+    "openspec/changes/kp-lead-document-release/.openspec.yaml",
+    "openspec/changes/kp-lead-document-release/design.md",
+    "openspec/changes/kp-lead-document-release/proposal.md",
+    "openspec/changes/kp-lead-document-release/specs/kp-lead-document-release/spec.md",
+    "openspec/changes/kp-lead-document-release/staging-acceptance.json",
+    "openspec/changes/kp-lead-document-release/tasks.md",
+    "openspec/changes/kp-lead-document-release/verification.md",
+    "packages/kp-template/assets/public/js/crm-transport.js",
+    "packages/kp-template/test/transport.test.cjs"
+  ],
+  "excluded274PathsRestored": 20,
+  "staging": {
+    "run": "https://github.com/navasiolau/pero_crm/actions/runs/45381387004",
+    "jobsPassed": 7,
+    "runtimeVerifiedAtUtc": "2026-11-24T11:20:44.592864+00:00",
+    "web": "sha256:3f9318c2b8156310a8344068add620bc32b0f5ecda60e76e71ffac0b70d30b1e",
+    "renderer": "sha256:69f7c51daae6a255661e53ca67aeacff76654bcba84a3e87ce6390a03790c701",
+    "cases": [
+      {
+        "kind": "pdf",
+        "number": "336",
+        "project": "336",
+        "proposal": "cmwulsxww0007qe01fkz1y77q",
+        "product": "cmwulsxxk0009qe019sucy00z",
+        "productNumber": "336.1",
+        "stage": "LEAD",
+        "pdfCount": 1,
+        "contractCount": 0,
+        "productFileCount": 1,
+        "workPreserved": true,
+        "historyPreserved": true,
+        "fx": 0.035612,
+        "revision": 2,
+        "job": "d3260846-da72-45b0-88e6-5e745453fb05"
+      },
+      {
+        "kind": "contract",
+        "number": "337",
+        "project": "337",
+        "proposal": "cmwulta6k001pqe0185aw1ahq",
+        "product": "cmwulta75001rqe01pgecxa4p",
+        "productNumber": "337.1",
+        "stage": "CONTRACT",
+        "pdfCount": 1,
+        "contractCount": 1,
+        "productFileCount": 1,
+        "workPreserved": true,
+        "historyPreserved": true,
+        "fx": 0.035612,
+        "revision": 2,
+        "job": "12f5163e-5e09-4bff-849f-cbb933add0db"
+      },
+      {
+        "kind": "replay",
+        "number": "338",
+        "project": "338",
+        "proposal": "cmwultq6q003dqe018qemb3o8",
+        "product": "cmwultq74003fqe01sw7em706",
+        "productNumber": "338.1",
+        "stage": "LEAD",
+        "pdfCount": 1,
+        "contractCount": 0,
+        "productFileCount": 1,
+        "workPreserved": true,
+        "historyPreserved": true,
+        "fx": 0.035612,
+        "revision": 2,
+        "job": "2a3438c8-cd0b-4a58-a629-9a54f8814464",
+        "sameOperationAndJob": true
+      }
+    ],
+    "documentChecks": {
+      "pdf": {
+        "pages": 2,
+        "bytes": 230563,
+        "sha256": "fd5762c85e3e7be6e601241a5c72c043c50a629e2577f06272ed1f8765b1da94",
+        "positionAmountConfirmed": true,
+        "illustrationPresent": true
+      },
+      "contract": {
+        "pages": 2,
+        "bytes": 234116,
+        "sha256": "37e7dc82faf21f05c91c5cea2b199dc294f162c3adc6e32c4adc6522eae8853d",
+        "positionAmountConfirmed": true,
+        "illustrationPresent": true,
+        "docxSha256": "73058c5f25e5bd4d4397e3a97813f1803ff8a48f84a5e8869f43fe8c5d148dc2",
+        "docxBytes": 448180,
+        "embeddedQuotePages": 2,
+        "contractTextChecked": true,
+        "feature274InstructionAbsent": true,
+        "originalAppendices123": true,
+        "renderedWordPages": 9
+      },
+      "replay": {
+        "pages": 2,
+        "bytes": 232809,
+        "sha256": "d8bffecc0c3f833f55397e43fcc0e0c1c396498faeee4d2f0b0d9b28a371e7f2",
+        "positionAmountConfirmed": true,
+        "illustrationPresent": true
+      }
+    }
+  },
+  "production": {
+    "run": "https://github.com/navasiolau/pero_crm/actions/runs/45383648142",
+    "jobsPassed": 7,
+    "runtimeVerifiedAtUtc": "2026-11-24T11:36:14.586202+00:00",
+    "deployment": {
+      "project": "crm",
+      "at": "2026-11-24T11:36:10.051473+00:00",
+      "status": "deployed",
+      "revision": "9075ceeb1c2bcb5e1c078032179a2b471bbf863b",
+      "health": "healthy",
+      "web_ref": "ghcr.io/navasiolau/pero_crm@sha256:2cb471e98f5be552d47e48ac397ab68d3df1e0e9fd3bf0034b9f4cbfba6c5633",
+      "renderer_ref": "ghcr.io/navasiolau/pero_kp_renderer@sha256:9bda931392f15ef0c96058358666e51b5d5dc49a83137438fe41ce54872b20f7",
+      "migration": "applied",
+      "moscowTime": "2026-11-24T14:36:10.051473+03:00"
+    },
+    "web": "sha256:2cb471e98f5be552d47e48ac397ab68d3df1e0e9fd3bf0034b9f4cbfba6c5633",
+    "renderer": "sha256:9bda931392f15ef0c96058358666e51b5d5dc49a83137438fe41ce54872b20f7",
+    "health": {
+      "http": 200,
+      "status": "ok",
+      "database": "ok"
+    },
+    "originalContractTemplatesAndUpdatedTransportInBothImages": true,
+    "databaseContainerStartAndMountsPreserved": true,
+    "proxyPreserved": true,
+    "project209": {
+      "number": "209",
+      "stage": "LEAD",
+      "canEdit": true,
+      "revision": 1,
+      "fixedRatePresent": false
+    },
+    "project209Verification": "GET документа, без выпуска на рабочем заказе",
+    "migrationFiles": {
+      "files": 119,
+      "manifestSha256": "770e3cf6786a7d1aa74095d0209b01ce33986b1c47391033be478938303c5db2"
+    }
+  }
+}
