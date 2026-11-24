@@ -22,6 +22,45 @@ function product(f: Fixture, id: string): FixtureRow {
   const row = f.state.products.find(row => row.id === id); assert.ok(row); return row;
 }
 
+test("перенесённое КП сохраняет карточки по прежним позициям и группирует скрытие в журнале", async () => {
+  const f = proposalFixture();
+  const { result } = await create(f, [{ name: "Лестница", qty: 1 }, { name: "Тумба", qty: 2 }]);
+  f.state.proposals[0].sourceId = "legacy-r2:test:lead";
+  for (const item of f.state.items) item.productId = null;
+  const [stairs, cabinet] = result.items;
+  product(f, stairs.productId).status = "PREPARATION";
+  f.state.products.push({ ...product(f, stairs.productId), id: "only-in-crm", suffixInt: 9, number: result.number + ".9" });
+  f.state.works.push({ id: "existing-work", productId: stairs.productId, deletedAt: null });
+  const command = { operationId: randomUUID(), proposalId: result.proposalId, expectedRevision: result.revision,
+    state: { ...result.state, items: [...result.state.items].reverse() } };
+  const submit = () => f.transaction(tx => saveProposalInTransaction(tx, actor, command, { ...f.hooks, journalCheckpoints: true }));
+  const saved = await submit();
+  assert.deepEqual(saved.result.items.map(item => item.productId), [cabinet.productId, stairs.productId]);
+  assert.equal(product(f, stairs.productId).status, "PREPARATION");
+  assert.equal(f.state.works[0].productId, stairs.productId);
+  assert.ok(product(f, "only-in-crm").deletedAt);
+  const root = f.state.logs.find(row => row.entityId === result.proposalId && row.action === "update")!;
+  const child = f.state.logs.find(row => row.entityId === "only-in-crm" && row.action === "kp.synchronize")!;
+  assert.equal(child.operationRootId, root.id);
+  assert.ok(!f.state.logs.some(row => row.entityId === "only-in-crm" && row.field === "quantity"));
+  const count = f.state.logs.length;
+  assert.equal((await submit()).result.repeated, true);
+  assert.equal(f.state.logs.length, count);
+});
+
+test("позиция перенесённого КП не забирает изделие, уже связанное с другой позицией", async () => {
+  const f = proposalFixture();
+  const { result } = await create(f, [{ name: "Изделие", qty: 1 }]);
+  f.state.proposals[0].sourceId = "legacy-r2:test:occupied";
+  const original = result.items[0].productId;
+  f.state.items[0].productId = null;
+  f.state.items.push({ ...f.state.items[0], id: "other-proposal-item", proposalId: "another-proposal",
+    productId: original, deletedAt: new Date(0) });
+  const saved = await save(f, result);
+  assert.notEqual(saved.result.items[0].productId, original);
+  assert.equal(f.state.items.find(row => row.id === "other-proposal-item")?.productId, original);
+});
+
 test("shared project and quote allocator includes soft-deleted numbers; rollback never spends a number", async () => {
   const f = proposalFixture();
   const [normal, quote] = await Promise.all([

@@ -24,6 +24,60 @@ const doc = () => ({ id: 'primary', revision: 2, state: { currency: 'BYN', items
   canEdit: true, client: { id: 'client', label: 'Клиент' }, project: { id: 'project', number: '231', stage: 'LEAD' }, fx: { currency: 'BYN', rate: '1', date: '2026-10-18', source: 'NBRB' } });
 const response = value => new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
 
+test('первый выпуск PDF или договора фиксирует курс неизменённого КП и использует подтверждённую редакцию', async () => {
+  for (const kind of ['pdf', 'contract']) {
+    const initial = { ...doc(), fx: null, state: { ...doc().state, currency: '₽', order: { date: '18.08.2026' } } };
+    const rate = { currency: 'RUB', source: 'NBRB', date: '2026-08-18', rate: '0.035612' };
+    const refs = [{ proposalId: 'primary', expectedRevision: initial.revision }];
+    const testbed = fixture(async call => {
+      if (call.url === '/api/kp/contracts?documentId=primary') return response({ revision: 4, clientBaseline: 'same', sourceRefs: copy(refs) });
+      if (call.options.method === 'PUT' && call.url === '/api/kp/documents/primary') {
+        assert.equal(call.body.expectedRevision, initial.revision);
+        assert.deepEqual(call.body.state, initial.state);
+        return response({ ...initial, revision: 3, fx: rate });
+      }
+      if (call.url.startsWith('/api/kp/rates?')) return response({ fx: rate });
+      assert.equal(call.url, kind === 'pdf' ? '/api/kp/documents/primary/pdf' : '/api/kp/contract');
+      if (kind === 'pdf') assert.equal(call.body.expectedRevision, 3);
+      else {
+        assert.deepEqual(call.body.sourceRefs, [{ proposalId: 'primary', expectedRevision: 3 }]);
+        assert.equal(call.body.clientBaseline, 'same');
+      }
+      return response({ id: 'job', state: 'SUCCEEDED', result: { artifactId: 'ready', fileName: kind, downloadUrl: '/api/kp/artifacts/ready/download' } });
+    });
+    testbed.remote = initial;
+    testbed.api.focusDocument(initial);
+    testbed.api.attachEditor({ ensureSaved: async () => testbed.api.getDocument(), getState: () => initial.state });
+    if (kind === 'pdf') assert.equal((await testbed.api.generatePdf()).artifactId, 'ready');
+    else {
+      await testbed.api.request('/api/contracts?documentId=primary');
+      assert.equal(testbed.calls.length, 1);
+      const result = await testbed.api.request('/api/contract', { method: 'POST', body: JSON.stringify({ documentId: 'primary' }) });
+      assert.match(result.downloadUrl, /ready/);
+    }
+    assert.equal(testbed.calls.filter(call => call.options.method === 'PUT').length, 1);
+  }
+});
+
+test('потеря ответа при выпуске договора возвращает прежний файл, в том числе после смены этапа', async () => {
+  let accepted, posts = 0;
+  const testbed = fixture(async call => {
+    if (call.url === '/api/kp/contracts?documentId=primary') return response({ revision: 4, clientBaseline: 'same', sourceRefs: [{ proposalId: 'primary', expectedRevision: 2 }] });
+    assert.equal(call.url, '/api/kp/contract');
+    posts++;
+    if (!accepted) { accepted = copy(call.body); throw new Error('LOST_ACK'); }
+    assert.deepEqual(call.body, accepted);
+    return response({ id: 'job', state: 'SUCCEEDED', result: { fileName: 'договор.docx', downloadUrl: '/api/kp/artifacts/original/download' } });
+  });
+  testbed.api.focusDocument(doc());
+  await testbed.api.request('/api/contracts?documentId=primary');
+  const send = () => testbed.api.request('/api/contract', { method: 'POST', body: '{"documentId":"primary"}' });
+  await assert.rejects(send(), /LOST_ACK/);
+  testbed.api.focusDocument({ ...doc(), canEdit: false, revision: 3, project: { ...doc().project, stage: 'CONTRACT' } });
+  assert.equal((await send()).downloadUrl, '/api/kp/artifacts/original/download');
+  assert.equal(posts, 2);
+});
+
 test('actual editor field matrix repairs legacy records and preserves preview, save, reload and boundaries', async () => {
   const rows = [
     ['header.company', 'ORG_TEST'], ['header.tagline', '<tag> & text'], ['header.phone', '+000 1112223'], ['header.phone2', '+000 4445556'],

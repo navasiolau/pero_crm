@@ -979,6 +979,12 @@ test("kp181/native-composition-stable-ids-active-number-swap-client-mirror-repla
   assert.equal(result.sameIdRestore, true); assert.equal(result.rollbackNoNumberSpent, true); assert.equal(result.atomicFailureRollback, true);
 }));
 
+test("kp275/native-first-rate-preserves-existing-product-work-file-history-and-replay", async () => fixture.rollback(async (tx, rows) => {
+  const actor = actorOf(await rows.user("kp275-domain-manager", ["MANAGER"]));
+  const { verifyLeadReleaseSave } = await import("../helpers/kp-lead-release-native");
+  await run(actor, tx, () => verifyLeadReleaseSave(tx, actor, proposals));
+}));
+
 test("kp254/native-first-save-creates-immutable-checkpoint-without-a-pdf", async () => fixture.rollback(async (tx, rows) => {
   const actor = actorOf(await rows.user("kp254-checkpoint-admin", ["ADMIN"]));
   const temporary = await tx.client.create({ data: { name: "Временный", phone: "KP254_SYNTHETIC" } });
