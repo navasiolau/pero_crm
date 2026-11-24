@@ -23,14 +23,14 @@ const commercialSnapshot = (product: Product) => ({
 });
 
 async function auditProductSync(tx: Prisma.TransactionClient, actor: DomainActor,
-  proposalId: string, before: Product, after: Product, operationRootId?: string, quantityRootId?: string) {
+  proposalId: string, before: Product, after: Product, { operationRootId, quantityRootId }: { operationRootId?: string; quantityRootId?: string }) {
   const audit = { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
     entity: "product", entityId: after.id, action: "update" };
   const context = { ...productJournalContext(after), ...automationJournalContext(actor, "Обновление изделия из КП"),
     links: [{ type: "commercialProposal", id: proposalId, label: "Коммерческое предложение" }] };
   if (!operationRootId) for (const field of ["title", "kind", "quantity", "technicalSpecifications"] as const) {
     const reversal = field === "technicalSpecifications" ? technicalSpecificationsCommand(before, after) : productFieldCommand(field, before, after);
-    if (!operationRootId && (reversal || (field === "quantity" && quantityRootId))) await writeChangeLogInTransaction(tx, {
+    if (reversal || (field === "quantity" && quantityRootId)) await writeChangeLogInTransaction(tx, {
       ...audit, id: field === "quantity" ? quantityRootId : undefined, field, reversal,
       oldValue: before[field], newValue: after[field],
     }, context);
@@ -48,7 +48,7 @@ async function auditProductSync(tx: Prisma.TransactionClient, actor: DomainActor
 /** Проект уже заблокирован; денежные поля применяет следующий hook в этой же tx. */
 export async function synchronizeProposalItemsInTransaction(
   tx: Prisma.TransactionClient, actor: DomainActor,
-  proposal: { id: string; projectId: string }, project: { number: string },
+  proposal: { id: string; projectId: string; sourceId?: string | null }, project: { number: string },
   items: readonly ProposalItemState[], changedAt: Date, operationRootId?: string,
 ) {
   const existingItems = await tx.proposalItem.findMany({ where: { proposalId: proposal.id } });
@@ -64,15 +64,30 @@ export async function synchronizeProposalItemsInTransaction(
   const products = await tx.product.findMany({ where: { projectId: proposal.projectId }, orderBy: { id: "asc" } });
   await stabilizeProductNumberLinks(tx, products.filter(product => !product.deletedAt));
   const productsById = new Map(products.map(product => [product.id, product]));
+  const productIdByItem = new Map(existingItems.map(item => [item.id, item.productId]));
+  if (proposal.sourceId) {
+    const missing = existingItems.filter(item => !item.deletedAt && !item.productId && incomingIds.has(item.id));
+    if (missing.length) {
+      // Используем позицию сохранённой редакции: пользователь мог уже переставить строки.
+      const itemsByNumber = new Map(missing.map(item => [`${project.number}.${item.position}`, item.id]));
+      const candidates = products.filter(product => !product.deletedAt && itemsByNumber.has(product.number));
+      const owners = await tx.proposalItem.findMany({ where: { productId: { in: candidates.map(product => product.id) } },
+        select: { productId: true } });
+      const occupied = new Set(owners.map(item => item.productId));
+      for (const product of candidates) {
+        if (!occupied.has(product.id)) productIdByItem.set(itemsByNumber.get(product.number)!, product.id);
+      }
+    }
+  }
   if (items.some(item => {
-    const productId = existingById.get(item.id)?.productId;
+    const productId = productIdByItem.get(item.id);
     return productId && productsById.get(productId)?.quantity !== item.qty;
   })) await assertWarehouseMetadataWritable(tx);
   const retained = new Set<string>();
   for (const item of items) {
-    const existing = existingById.get(item.id);
-    if (!existing?.productId) continue;
-    const product = productsById.get(existing.productId);
+    const productId = productIdByItem.get(item.id);
+    if (!productId) continue;
+    const product = productsById.get(productId);
     if (!product || product.projectId !== proposal.projectId)
       throw new ProposalWriteError("validation", "Изделие позиции не принадлежит проекту КП");
     retained.add(product.id);
@@ -85,7 +100,7 @@ export async function synchronizeProposalItemsInTransaction(
     const after = await tx.product.update({ where: { id: product.id }, data: {
       deletedAt: changedAt, deletedById: actor.id,
     } });
-    await auditProductSync(tx, actor, proposal.id, product, after, undefined, operationRootId);
+    await auditProductSync(tx, actor, proposal.id, product, after, { operationRootId });
     previousNumbers.set(product.id, product.number);
     changed = true;
   }
@@ -113,7 +128,7 @@ export async function synchronizeProposalItemsInTransaction(
 
   // Partial UNIQUE не откладывается: сначала освобождаем все действующие номера.
   const needsRenumber = items.some((item, position) => {
-    const productId = existingById.get(item.id)?.productId;
+    const productId = productIdByItem.get(item.id);
     const product = productId ? productsById.get(productId) : undefined;
     return product && (product.number !== `${project.number}.${position + 1}` || product.suffixInt !== position + 1 || product.deletedAt !== null);
   });
@@ -128,7 +143,8 @@ export async function synchronizeProposalItemsInTransaction(
   for (const [index, state] of items.entries()) {
     const position = index + 1;
     const existing = existingById.get(state.id);
-    let before = existing?.productId ? productsById.get(existing.productId) : undefined;
+    const productId = productIdByItem.get(state.id);
+    let before = productId ? productsById.get(productId) : undefined;
     const number = `${project.number}.${position}`;
     const incoming = FurnitureSpecifications.fromProposalForProduct(state);
     const current = FurnitureSpecifications.normalizeProduct(before?.technicalSpecifications);
@@ -171,7 +187,7 @@ export async function synchronizeProposalItemsInTransaction(
     const after = commercialChanged || (needsRenumber && retained.has(before.id))
       ? await tx.product.update({ where: { id: before.id }, data }) : before;
     if (created || commercialChanged) {
-      await auditProductSync(tx, actor, proposal.id, before, after, operationRootId, quantityRootId);
+      await auditProductSync(tx, actor, proposal.id, before, after, { operationRootId, quantityRootId });
       previousNumbers.set(before.id, before.number);
       changed = true;
     }

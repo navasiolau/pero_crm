@@ -309,9 +309,26 @@
         var result = await poll(job); clear(); emit({ type: 'versions-changed' }); return result;
       } catch (error) { if (error.knownTerminalJob === true) clear(); throw error; }
     }
+    async function prepareReleaseSource(doc) {
+      if (!doc.canEdit || doc.fx) return doc;
+      // При отсутствии fx штатный PUT получает курс НБРБ на дату сохранённого КП.
+      var body = { proposalId: doc.id, expectedRevision: doc.revision, state: doc.state };
+      var pending = await operation(doc.id, 'release-rate:' + doc.revision, body);
+      var saved = await request('/documents/' + encodeURIComponent(doc.id), json('PUT', (pending.entry || pending.previous).body));
+      if (saved?.id !== doc.id || !saved.fx || !Number.isSafeInteger(saved.revision) || saved.revision <= doc.revision)
+        throw new Error('Не удалось подтвердить сохранение курса для выпуска');
+      remove(pending.storageKey); delete retainedOperations[pending.storageKey];
+      if (doc.id !== currentId) documents[doc.id] = saved;
+      else if (!viewingVersion && current.revision <= saved.revision) {
+        if (activeDraft || clientIntent) await refreshCurrent(saved);
+        else publish(remember(saved));
+      }
+      return saved;
+    }
     async function generatePdf() {
       var saved = await ensureSaved();
       if (viewingVersion) throw new Error('Скачайте PDF выбранной версии из списка версий');
+      saved = await prepareReleaseSource(saved);
       var body = { proposalId: saved.id, expectedRevision: saved.revision }, storageKey = key(saved.id, 'operation:pdf');
       var previous = retainedOperations[storageKey] || read(storageKey), pending = await operation(saved.id, 'pdf', body);
       var prior = (pending.entry || pending.previous).body, path = '/documents/' + encodeURIComponent(saved.id) + '/pdf';
@@ -436,6 +453,33 @@
       if (parsed.pathname === '/api/contract' && options.method === 'POST') {
         var input = JSON.parse(options.body), form = contractForms[input.documentId];
         if (!form) throw new Error('Откройте настройки договора заново');
+        var contractKey = key(input.documentId, 'operation:contract');
+        var prior = retainedOperations[contractKey] || read(contractKey);
+        if (prior) {
+          try {
+            var recovered = await publishJob('/contract', { storageKey: contractKey, entry: prior });
+            return { downloadUrl: recovered.downloadUrl, filename: recovered.fileName };
+          } catch (error) {
+            if (error.status !== 409 || !['KP_RATE_REQUIRED', 'KP_RELEASE_REQUIRED', 'CONTRACT_SOURCE_CHANGED'].includes(error.data?.error?.code)) throw error;
+            // Сервер проверяет receipt перед условиями выпуска. Подтверждаем отсутствие операции до замены UUID.
+            try {
+              var receipt = await request('/operations/' + encodeURIComponent(prior.body.operationId));
+              if (receipt.operationId !== prior.body.operationId || receipt.kind !== 'contract.generate') throw error;
+              var completed = await poll(receipt.result);
+              remove(contractKey); delete retainedOperations[contractKey];
+              return { downloadUrl: completed.downloadUrl, filename: completed.fileName };
+            } catch (lookupError) {
+              if (lookupError.status !== 404 || lookupError.data?.error?.code !== 'KP_OPERATION_NOT_FOUND') throw lookupError;
+              remove(contractKey); delete retainedOperations[contractKey];
+            }
+          }
+        }
+        for (var ref of form.sourceRefs) {
+          var source = documents[ref.proposalId];
+          if (!source || source.revision !== ref.expectedRevision) throw new Error('КП изменилось. Обновите расчёт договора');
+          var prepared = await prepareReleaseSource(source);
+          ref.expectedRevision = prepared.revision;
+        }
         var body = { documentId: input.documentId, expectedRevision: form.revision, clientBaseline: form.clientBaseline,
           sourceRefs: form.sourceRefs };
         var pending = await operation(input.documentId, 'contract', body);

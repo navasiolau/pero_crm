@@ -232,7 +232,7 @@ export async function saveProposalInTransaction(tx: Prisma.TransactionClient, ac
       before:{title:project.title,address:project.address,clientId:project.clientId},after:{...values,clientId:selection.client.id},
       links:[{type:'commercialProposal',id:proposal.id,label:`КП ${project.number}`} ]});
   }
-  const sync = await synchronizeProposalItemsInTransaction(tx, actor, { id: proposal.id, projectId: project.id }, project,
+  const sync = await synchronizeProposalItemsInTransaction(tx, actor, { id: proposal.id, projectId: project.id, sourceId: proposal.sourceId }, project,
     state.items, hooks.now?.() ?? new Date(), operationRootId);
   const context = { actor, proposalId: proposal.id, proposal, operationRootId,
     project: { ...project, ...values, clientId: selection.client.id }, state, items: sync.items };
