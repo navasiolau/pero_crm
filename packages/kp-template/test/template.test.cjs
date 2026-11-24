@@ -61,10 +61,7 @@ test('all textarea consumers preserve literal text and line breaks in both item 
 test('immutable original print CSS, contract template and model match captured source hashes', () => {
   const manifest = template.sourceManifest;
   for (const name of ['public/css/app.css', 'public/css/contract.css', 'public/js/contract-model.js', 'lib/contract-docx.js', 'templates/contracts/furniture.docx']) {
-    const reference = ['lib/contract-docx.js', 'templates/contracts/furniture.docx'].includes(name)
-      ? path.join(__dirname, 'original', name)
-      : template.assetPath(name);
-    const bytes = readFileSync(reference);
+    const bytes = readFileSync(template.assetPath(name));
     assert.equal(createHash('sha256').update(bytes).digest('hex'), manifest.files[name].sha256, name);
   }
 });

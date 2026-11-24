@@ -1,0 +1,92 @@
+{
+  "testedStagingSha": "e57215cd8901e2a736a7cc62cee007dbd3ad0e14",
+  "ci": "https://github.com/navasiolau/pero_crm/actions/runs/45376087515",
+  "ciJobsPassed": 7,
+  "webImage": "sha256:8cead61fe4e4f1c596bbababe664789f6f0ac3664112ac36e406fbc4a0254880",
+  "rendererImage": "sha256:cea6155b6ed1d036e0e6a0a18958a5f4aeea9efb321ace877cd4bf2e9c8bcf07",
+  "dbStartedAt": "2026-11-10T18:42:15.758341834Z",
+  "cases": [
+    {
+      "kind": "pdf",
+      "number": "333",
+      "project": "333",
+      "proposal": "cmwukwevp0007ps01lrl8owpz",
+      "product": "cmwukwew60009ps01zk5v3z4j",
+      "productNumber": "333.1",
+      "stage": "LEAD",
+      "pdfCount": 1,
+      "contractCount": 0,
+      "productFileCount": 1,
+      "workPreserved": true,
+      "historyPreserved": true,
+      "fx": 0.035612,
+      "revision": 2,
+      "job": "7434c377-cac5-4e41-807f-b8e1df77af73"
+    },
+    {
+      "kind": "contract",
+      "number": "334",
+      "project": "334",
+      "proposal": "cmwukxzmk001pps01eirn6fo0",
+      "product": "cmwukxzmv001rps01lnr94daz",
+      "productNumber": "334.1",
+      "stage": "CONTRACT",
+      "pdfCount": 1,
+      "contractCount": 1,
+      "productFileCount": 1,
+      "workPreserved": true,
+      "historyPreserved": true,
+      "fx": 0.035612,
+      "revision": 2,
+      "job": "e4fcf821-a880-4db8-a41b-e0002b9629f5"
+    },
+    {
+      "kind": "replay",
+      "number": "335",
+      "project": "335",
+      "proposal": "cmwukyfah003dps01g0kukfi3",
+      "product": "cmwukyfaw003fps015jmgs1ge",
+      "productNumber": "335.1",
+      "stage": "LEAD",
+      "pdfCount": 1,
+      "contractCount": 0,
+      "productFileCount": 1,
+      "workPreserved": true,
+      "historyPreserved": true,
+      "fx": 0.035612,
+      "revision": 2,
+      "job": "a660a80e-13c0-4209-939e-a9962adbc802",
+      "sameOperationAndJob": true
+    }
+  ],
+  "files": {
+    "pdf": {
+      "pages": 2,
+      "bytes": 230218,
+      "sha256": "1ccc6c3b382e6dbcaa65185a4d4fbc3b5364d28e32eab3dc31d988b0a2c1c6aa",
+      "positionAmountConfirmed": true,
+      "illustrationPresent": true
+    },
+    "contract": {
+      "pages": 2,
+      "bytes": 233770,
+      "sha256": "aad6fa5d8b93c3f8bc1a919a6ce5ff7c8d847d8a76c4045f22688ff8eeed7df7",
+      "positionAmountConfirmed": true,
+      "illustrationPresent": true,
+      "docxSha256": "fca325db4ce4b7b40f753c5d42a507c58f33b66240dbdbab5a3207e24a162a59",
+      "docxBytes": 448788,
+      "embeddedQuotePages": 2,
+      "contractTextChecked": true,
+      "renderedWordPages": 10
+    },
+    "replay": {
+      "pages": 2,
+      "bytes": 232464,
+      "sha256": "ed65cab9775bac740555ed98cc7decd6f58dfc8639e9c7d7c3b35d3201e512e1",
+      "positionAmountConfirmed": true,
+      "illustrationPresent": true
+    }
+  },
+  "visualReview": "Word и PDF, все страницы",
+  "stagingQaUserDeactivated": true
+}

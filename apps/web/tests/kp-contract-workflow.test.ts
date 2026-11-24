@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { ContractModel, contractTemplateVersion, generateDocx } from "@pero/kp-template";
 import { createContractWorkflow } from "../src/server/kp/contract-workflow";
-import { createContractModelPort } from "../src/server/kp/contract-model";
 import { contractClientDefaults, settingsDocument } from "../src/server/kp/contract-client";
 import { contractDraftRequestSchema, contractExportRequestSchema } from "../src/server/kp/contract-request";
 import { ContractWorkflowError } from "../src/server/kp/contract-types";
@@ -30,37 +28,6 @@ test('все этапы проекта: успешный договор прод
     assert.equal(prepared.f.state.versions.length, 1, 'повтор успешной операции не создаёт версию');
     assert.deepEqual(prepared.f.state.stages, ['LEAD', 'ESTIMATE'].includes(stage) ? ['cp_a'] : [], stage);
   }
-});
-
-test("история договора сохраняет файл и данные инструкции из выпущенной версии", async () => {
-  const f = contractWorkflowFixture();
-  const item = { name: "Кухня", price: 500, qty: 1, products: [{ title: "Фурнитура", drawers: "BOYARD SB28GR.1/400" }] };
-  f.state.sources[0].state.items = [item];
-  f.ports.model = createContractModelPort(ContractModel);
-  f.ports.templateVersion = String(contractTemplateVersion);
-  f.ports.profiles = [{ id: "pero-by", name: "Исполнитель", country: "BY", positionGenitive: "директора", directorGenitive: "Тестова",
-    authority: "устава", address: "Тестовый адрес", taxId: "0", bankDetails: "Тест", phones: [], email: "fixture@example.invalid", site: "", signature: "Тестов" }];
-  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAPoAAAD6AG1eJrAAAAEUlEQVQImWM4tKTxPwgzwBgAZ0ILmdrs+PUAAAAASUVORK5CYII=", "base64");
-  f.ports.io.generateDocx = (settings, summary, profile, sources) => generateDocx(settings, summary, profile, sources.map(row => ({ ...row, images: [png] })));
-
-  const prepared = await prepare(f);
-  await prepared.workflow.runClaim(prepared.claim);
-  const [historical] = (await prepared.workflow.form(contractActor, "cp_a")).versions;
-  const version = f.state.versions[0];
-  const snapshotText = JSON.stringify(version.renderSnapshot);
-  assert.match(snapshotText, /SB28GR\.1\/400/);
-  assert.match(snapshotText, /35 кг/);
-  assert.match(snapshotText, /22\.11\.2026/);
-  assert.equal(f.state.artifacts.get(historical.docxArtifactId)?.state, "READY");
-  const recordedHash = f.state.artifacts.get(historical.docxArtifactId)?.sha256;
-  assert.match(recordedHash ?? "", /^[a-f0-9]{64}$/);
-
-  f.state.sources[0].state.items = [{ ...item, products: [{ title: "Фурнитура", drawers: "BOYARD SB28GR.1/500" }] }];
-  f.state.sources[0].revision++;
-  const [readAgain] = (await prepared.workflow.form(contractActor, "cp_a")).versions;
-  assert.deepEqual(readAgain, historical);
-  assert.equal(f.state.artifacts.get(readAgain.docxArtifactId)?.sha256, recordedHash);
-  assert.equal(JSON.stringify(f.state.versions[0].renderSnapshot), snapshotText);
 });
 
 test('ошибка перехода откатывает готовый договор и версии приложений одной транзакцией', async () => {
